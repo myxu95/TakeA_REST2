@@ -39,7 +39,7 @@ class ConfigManager:
         
         # Selection parameters
         'distance_range': 6.0,     # Cutoff distance for nearby residues (Angstrom)
-        'target_selection': 'chain C',  # Target selection: 'chain C' for peptide or 'resname LIG' for ligand
+        'target_selection': 'chain A',  # Target selection: 'chain A' for peptide or 'resname LIG' for ligand
         'use_trajectory': False,   # Whether to use trajectory for selection
         'occupancy_threshold': 0.5, # Threshold for trajectory-based selection
         
@@ -140,9 +140,19 @@ topology: null      # Will be set to md_results_dir/topol.top
 plumed_dat: templates/plumed.dat
 output_tpr: ./rest2_system.tpr
 
+# GROMACS execution settings
+gromacs:
+  gmx_mpi_command: gmx_mpi
+  n_cpus: null      # Default: same as n_replicas
+  n_gpus: null      # Default: same as n_replicas
+  script_types:     # Scripts to generate
+    - slurm
+    - localrun
+    - test
+
 # Selection parameters
 distance_range: 6.0         # Cutoff distance (Angstrom)
-target_selection: chain C   # Target selection: 'chain C' for peptide or 'resname LIG' for ligand
+target_selection: chain A   # Target selection: 'chain A' for peptide or 'resname LIG' for ligand
 use_trajectory: false       # Use trajectory for dynamic selection
 occupancy_threshold: 0.5    # Occupancy threshold (if use_trajectory=true)
 
