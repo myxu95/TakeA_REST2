@@ -1,0 +1,37 @@
+# REST2 Configuration for Example Files - Chain C Selection
+target_type: peptide
+T_min: 300.0
+T_max: 340.0
+replex: 200
+n_replicas: 8
+scaling_method: linear
+
+# File paths
+input_tpr: example/md.tpr
+topology: example/topol.top
+output_tpr: rest2_topol.top
+# plumed_dat: templates/plumed.dat  # 注释掉，只使用REST2命令
+
+# Selection parameters - Chain C selection
+distance_range: 6.0
+target_selection: chainid C  # Select chain C as target (MDAnalysis syntax)
+use_trajectory: false
+occupancy_threshold: 0.5
+
+# MD results directory
+md_results_dir: example
+
+# Output settings
+output_dir: ./rest2_simulation
+force_overwrite: true
+
+# GROMACS settings
+gromacs:
+  gmx_mpi_command: gmx_mpi
+  n_cpus: 8
+  n_gpus: 8
+  script_types: [slurm, localrun, test]
+
+# Simulation settings
+simulation:
+  production_time: 100.0 

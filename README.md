@@ -5,8 +5,8 @@ Automated setup and execution of REST2 (Replica Exchange with Solute Tempering) 
 ## Quick Start
 
 1. **Prepare MD results**: Complete standard MD simulation (EM → NVT → NPT → MD)
-2. **Configure**: Edit `config.yaml` with your system parameters
-3. **Run**: `python main.py -c config.yaml`
+2. **Configure**: Edit `configs/config_simple.yaml` with your system parameters
+3. **Run**: `python main.py -c configs/config_simple.yaml`
 4. **Execute**: Submit generated scripts to run REST2 simulation
 
 ## Requirements
@@ -21,7 +21,10 @@ Automated setup and execution of REST2 (Replica Exchange with Solute Tempering) 
 ```
 REST2_Project/
 ├── main.py                    # Main execution script
-├── config.yaml               # Configuration file
+├── configs/                   # Configuration files
+│   ├── config_simple.yaml    # Simple configuration template
+│   ├── config_template.yaml  # Full configuration template
+│   └── example_config_chain_c.yaml  # Example configuration
 ├── modules/                   # Core modules
 │   ├── config_manager.py
 │   ├── structure_analyzer.py
@@ -39,62 +42,193 @@ REST2_Project/
         └── md.xtc (optional)
 ```
 
-## Configuration File
+## Running the Example
 
-Create `config.yaml` with your system parameters:
+The project includes a complete example to demonstrate the REST2 workflow. Follow these steps to run the example:
+
+### Step 1: Check Example Files
+```bash
+# Verify example files are present
+ls example/
+# Should show: md.gro, md.tpr, topol.top, example.xtc, charmm36-jul2021.ff/, mdp/
+```
+
+### Step 2: Install Dependencies
+```bash
+# Run the installation script
+./install.sh
+
+# Or manually install Python dependencies
+pip install -r requirements.txt
+```
+
+### Step 3: Configure for Example
+The example uses chain C selection. The configuration is already set up in `configs/example_config_chain_c.yaml`:
 
 ```yaml
-# Basic REST2 settings
-target_type: peptide          # 'peptide' or 'small_molecule'
-T_min: 300.0                 # Minimum temperature (K)
-T_max: 340.0                 # Maximum temperature (K)
-replex: 200                  # Exchange interval (steps)
-n_replicas: 8                # Number of replicas
-scaling_method: linear       # 'linear' or 'exponential'
+# Input files for example
+topology: "example/topol.top"
+input_tpr: "example/md.tpr"
+md_results_dir: "example"
+output_dir: "rest2_simulation"
 
-# Target selection
-target_selection: chain A    # 'chain A' for peptide or 'resname LIG' for ligand
-distance_range: 6.0          # Cutoff distance (Angstrom)
-use_trajectory: false        # Use trajectory for dynamic selection
-occupancy_threshold: 0.5     # Occupancy threshold if using trajectory
+# Target selection for chain C
+target_selection: "chainid C"
+distance_range: 5.0
 
-# File paths
-md_results_dir: example/MD_results  # Path to completed MD simulation
-plumed_dat: templates/plumed.dat    # PLUMED template (optional)
-output_dir: ./rest2_simulation      # Output directory
+# REST2 parameters
+n_replicas: 8
+temperature:
+  min: 300.0
+  max: 400.0
+temperature_method: "linear"
+replex: 1000
 
-# GROMACS execution settings
+# GROMACS settings
 gromacs:
-  gmx_mpi_command: gmx_mpi
-  n_cpus: 8                  # Number of CPU cores
-  n_gpus: 2                  # Number of GPUs
-  script_types:              # Scripts to generate
-    - slurm
-    - localrun
-    - test
+  gmx_mpi_command: "gmx_mpi"
+  n_cpus: 4
+  n_gpus: 1
+  script_types: ["slurm", "localrun", "test"]
 ```
+
+### Step 4: Run the Example
+```bash
+# Run complete REST2 setup
+python main.py -c configs/example_config_chain_c.yaml
+
+# Or run with verbose output
+python main.py -c configs/example_config_chain_c.yaml --verbose
+```
+
+### Step 5: Verify Output
+After successful execution, check the generated files:
+
+```bash
+# Check main output directory
+ls rest2_simulation/
+
+# Check replica directories
+ls rest2_simulation/replica_0/input/
+
+# Check generated scripts
+ls rest2_simulation/*.sh
+ls rest2_simulation/*.slurm
+```
+
+### Step 6: Test the Setup
+```bash
+# Navigate to output directory
+cd rest2_simulation
+
+# Run quick test (1000 steps)
+./test_rest2.sh
+
+# Check test results
+ls replica_*/output/
+```
+
+### Step 7: Run Full Simulation (Optional)
+```bash
+# For cluster submission
+sbatch run_rest2.slurm
+
+# For local execution
+./run_rest2_local.sh
+```
+
+## Example Workflow Details
+
+The example demonstrates these workflow steps:
+
+1. **Structure Analysis**: Analyzes `example/md.gro` and `example/md.tpr`
+   - Extracts PDB with chain information using `gmx trjconv`
+   - Identifies chain C atoms as target
+   - Finds nearby residues within 5.0 Å
+
+2. **Topology Merge**: Merges topology files using `gmx grompp -pp`
+   - Processes `example/topol.top` with `example/md.gro`
+   - Creates `processed.top` with merged topology information
+
+3. **Solute Selection**: Modifies topology for REST2 scaling
+   - Marks all solute atoms (not just alpha carbons)
+   - Creates `rest2_topol.top` with REST2 modifications
+
+4. **Replica Generation**: Creates 8 replica directories
+   - `replica_0/` through `replica_7/`
+   - Each with input files and output directories
+
+5. **Temperature Control**: Generates temperature-specific files
+   - Temperature range: 300K to 400K (linear spacing)
+   - PLUMED `PARTIAL_TEMPERING` commands for each replica
+   - MDP files with appropriate parameters
+
+6. **Script Generation**: Creates execution scripts
+   - `test_rest2.sh`: Quick validation script
+   - `run_rest2_local.sh`: Local execution script
+   - `run_rest2.slurm`: SLURM cluster script
+
+## Configuration Files
+
+### Simple Configuration (`configs/config_simple.yaml`)
+Use this for basic REST2 setup:
+
+```yaml
+# Input files
+topology: "example/topol.top"
+input_tpr: "example/md.tpr"
+md_results_dir: "example"
+output_dir: "rest2_simulation"
+
+# Target selection for REST2 scaling
+target_selection: "chainid A"
+distance_range: 5.0
+
+# REST2 parameters
+n_replicas: 8
+temperature:
+  min: 300.0
+  max: 400.0
+temperature_method: "linear"
+replex: 1000
+
+# GROMACS settings
+gromacs:
+  gmx_mpi_command: "gmx_mpi"
+  n_cpus: 4
+  n_gpus: 1
+  script_types: ["slurm", "localrun", "test"]
+
+# Simulation settings
+simulation:
+  production_time: 100.0
+  dt: 0.002
+```
+
+### Full Configuration Template (`configs/config_template.yaml`)
+Contains all available options with detailed descriptions and examples.
 
 ## Usage
 
 ### Basic Usage
 ```bash
 # Complete REST2 setup
-python main.py -c config.yaml
+python main.py -c configs/config_simple.yaml
 
 # Custom output directory
-python main.py -c config.yaml -o ./my_rest2_sim
+python main.py -c configs/config_simple.yaml -o ./my_rest2_sim
 ```
 
 ### Advanced Usage
 ```bash
 # Only validate configuration
-python main.py -c config.yaml --validate-only
+python main.py -c configs/config_simple.yaml --validate-only
 
 # Only generate execution scripts
-python main.py -c config.yaml --scripts-only
+python main.py -c configs/config_simple.yaml --scripts-only
 
 # Verbose output
-python main.py -c config.yaml --verbose
+python main.py -c configs/config_simple.yaml --verbose
 ```
 
 ## Workflow Steps
@@ -102,10 +236,11 @@ python main.py -c config.yaml --verbose
 The automation performs these steps:
 
 1. **Structure Analysis**: Identifies target atoms and nearby residues
-2. **Solute Selection**: Modifies topology file to mark REST2 atoms
-3. **Replica Generation**: Creates replica directories and copies files
-4. **Temperature Control**: Generates temperature-specific input files with PLUMED REST2
-5. **Script Generation**: Creates execution scripts for your environment
+2. **Topology Merge**: Merges topology files using GROMACS tools
+3. **Solute Selection**: Modifies topology file to mark REST2 atoms
+4. **Replica Generation**: Creates replica directories and copies files
+5. **Temperature Control**: Generates temperature-specific input files with PLUMED REST2
+6. **Script Generation**: Creates execution scripts for your environment
 
 ## Generated Files
 

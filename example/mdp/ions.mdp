@@ -1,0 +1,69 @@
+;====================================================
+; Energy minimization
+;====================================================
+
+;----------------------------------------------------
+; RUN CONTROL & MINIMIZATION
+;----------------------------------------------------
+define                 = -DFLEXIBLE
+integrator             = steep
+nsteps                 = 50000
+emtol                  = 1000
+emstep                 = 0.01
+nstcomm                = 1
+
+;----------------------------------------------------
+; OUTPUT CONTROL
+;----------------------------------------------------
+nstxout                = 5       ; save coordinates to .trr every 250 steps
+nstvout                = 0          ; don't save velocities to .trr
+nstfout                = 0          ; don't save forces to .trr
+
+nstxout-compressed     = 5       ; xtc compressed trajectory output every 500 steps
+compressed-x-precision = 1000
+nstlog                 = 1        ; update log file every 500 steps
+nstenergy              = 1        ; save energies every 500 steps
+nstcalcenergy          = 1
+
+;----------------------------------------------------
+; NEIGHBOR SEARCHING
+;----------------------------------------------------
+cutoff-scheme          = Verlet
+ns-type                = grid
+nstlist                = 1
+rlist                  = 1.2
+
+;----------------------------------------------------
+; BONDS
+;----------------------------------------------------
+constraints            = h-bonds
+constraint-algorithm     = lincs
+lincs_iter               = 1
+lincs-order              = 4
+continuation             = no
+
+;----------------------------------------------------
+; ELECTROSTATICS
+;----------------------------------------------------
+coulombtype            = PME
+rcoulomb               = 1.2
+pme-order              = 4
+fourierspacing         = 0.16
+ewald-rtol             = 1e-6
+
+;----------------------------------------------------
+; VDW
+;----------------------------------------------------
+vdw-type                = cut-off
+rvdw                    = 1.2
+vdw-modifier            = force-switch
+rvdw-switch             = 1.0
+DispCorr                = no
+
+;----------------------------------------------------
+; TEMPERATURE & PRESSURE COUPL
+;----------------------------------------------------
+Tcoupl              = no
+Pcoupl              = no
+gen_vel             = no
+

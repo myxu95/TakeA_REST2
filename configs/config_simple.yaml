@@ -1,0 +1,32 @@
+# REST2 Enhanced Sampling - Simple Configuration Template
+# Minimal configuration with essential parameters only
+
+# Input files
+topology: "example/topol.top"
+input_tpr: "example/md.tpr"
+md_results_dir: "example"
+output_dir: "rest2_simulation"
+
+# Target selection for REST2 scaling
+target_selection: "chainid A"
+distance_range: 5.0
+
+# REST2 parameters
+n_replicas: 8
+temperature:
+  min: 300.0
+  max: 400.0
+temperature_method: "linear"
+replex: 1000
+
+# GROMACS settings
+gromacs:
+  gmx_mpi_command: "gmx_mpi"
+  n_cpus: 4
+  n_gpus: 1
+  script_types: ["slurm", "localrun", "test"]
+
+# Simulation settings
+simulation:
+  production_time: 100.0
+  dt: 0.002 

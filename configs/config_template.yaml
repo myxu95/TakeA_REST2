@@ -1,0 +1,149 @@
+# REST2 Enhanced Sampling Configuration Template
+# This template contains all available configuration options with detailed descriptions
+
+# =============================================================================
+# File Paths and Input Data
+# =============================================================================
+
+# Main topology file (.top format)
+topology: "example/topol.top"
+
+# Input TPR file for structure analysis
+input_tpr: "example/md.tpr"
+
+# MD simulation results directory containing:
+# - md.gro: Structure file
+# - md.xtc: Trajectory file (optional)
+md_results_dir: "example"
+
+# Output directory for REST2 simulation files
+output_dir: "rest2_simulation"
+
+# Output topology file name (will be created)
+output_tpr: "rest2_topol.top"
+
+# =============================================================================
+# Structure Analysis Settings
+# =============================================================================
+
+# Target selection string for MDAnalysis
+# Examples:
+# - "chainid A" - Select chain A
+# - "resid 1:50" - Select residues 1-50
+# - "resname LYS" - Select lysine residues
+# - "name CA" - Select alpha carbons
+# - "chainid C and resid 1:100" - Select chain C residues 1-100
+target_selection: "chainid A"
+
+# Distance cutoff for nearby residue identification (Angstroms)
+distance_range: 5.0
+
+# Use trajectory for occupancy-based analysis
+use_trajectory: false
+
+# Occupancy threshold for trajectory analysis (0.0-1.0)
+occupancy_threshold: 0.5
+
+# =============================================================================
+# REST2 Simulation Parameters
+# =============================================================================
+
+# Number of temperature replicas
+n_replicas: 8
+
+# Temperature range (Kelvin)
+temperature:
+  min: 300.0
+  max: 400.0
+
+# Temperature scaling method
+# Options: "linear", "exponential"
+temperature_method: "linear"
+
+# Exchange frequency between replicas (steps)
+replex: 1000
+
+# =============================================================================
+# GROMACS Settings
+# =============================================================================
+
+gromacs:
+  # GROMACS MPI command
+  gmx_mpi_command: "gmx_mpi"
+  
+  # Number of CPUs per replica
+  n_cpus: 4
+  
+  # Number of GPUs per replica
+  n_gpus: 1
+  
+  # Script types to generate
+  # Options: ["slurm", "localrun", "test"]
+  script_types: ["slurm", "localrun", "test"]
+
+# =============================================================================
+# Simulation Parameters
+# =============================================================================
+
+simulation:
+  # Production simulation time (nanoseconds)
+  production_time: 100.0
+  
+  # Time step (picoseconds)
+  dt: 0.002
+  
+  # Output frequency (steps)
+  nstxout: 5000
+  nstvout: 5000
+  nstfout: 5000
+  nstlog: 5000
+  nstenergy: 5000
+
+# =============================================================================
+# PLUMED Settings
+# =============================================================================
+
+# PLUMED input file (optional)
+# If specified, will be copied to each replica
+plumed_dat: ""
+
+# =============================================================================
+# Advanced Settings
+# =============================================================================
+
+# Verbose output mode
+verbose: false
+
+# Validate configuration only (no execution)
+validate_only: false
+
+# Generate scripts only (requires existing setup)
+scripts_only: false
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+
+# Example 1: Protein-ligand system
+# target_selection: "chainid A and resid 1:200"
+# distance_range: 8.0
+# n_replicas: 12
+# temperature:
+#   min: 300.0
+#   max: 450.0
+
+# Example 2: Small molecule system
+# target_selection: "resname LIG"
+# distance_range: 3.0
+# n_replicas: 6
+# temperature:
+#   min: 300.0
+#   max: 350.0
+
+# Example 3: Protein-protein interface
+# target_selection: "chainid A and resid 50:150"
+# distance_range: 6.0
+# n_replicas: 10
+# temperature:
+#   min: 300.0
+#   max: 400.0 

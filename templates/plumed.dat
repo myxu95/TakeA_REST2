@@ -1,0 +1,17 @@
+# PLUMED template for REST2 simulations
+# This file will be combined with REST2 PARTIAL_TEMPERING command
+
+# Output frequency
+PRINT STRIDE=5000 FILE=COLVAR
+
+# Example: Distance between two atoms (uncomment and modify as needed)
+# DISTANCE ATOMS=1,100 LABEL=d1
+
+# Example: Radius of gyration (uncomment and modify as needed)
+# GYRATION ATOMS=1-100 LABEL=rg
+
+# Example: Secondary structure analysis (uncomment and modify as needed)
+# ALPHARMSD RESIDUES=1-100 LABEL=ss
+
+# Add your own PLUMED commands here
+# The REST2 PARTIAL_TEMPERING command will be automatically added at the top 
