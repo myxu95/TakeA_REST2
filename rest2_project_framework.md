@@ -276,5 +276,3 @@ python scripts/monitor_simulation.py --run-dir ./rest2_simulation/
 - 支持集群作业管理系统
 - 添加实时监控和自动重启功能
 - 支持多种输入格式 (PDB, GRO, etc.)
-
-这个框架提供了良好的模块化基础，你可以根据具体需求逐步完善每个模块的实现细节。
