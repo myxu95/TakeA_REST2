@@ -111,7 +111,12 @@ def run_structure_analysis(config_manager, verbose=False):
         )
         
         # Print results
-        analyzer.print_selected_residues(results)
+        output_dir = Path(config_manager.get_parameter('output_dir'))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save residue information to file
+        residue_info_file = str(output_dir / "selected_residues.txt")
+        analyzer.print_selected_residues(results, output_file=residue_info_file)
         
         # Get data for next step
         solute_data = analyzer.get_solute_selection_data(results)
@@ -133,7 +138,13 @@ def run_topology_merge(config_manager, verbose=False):
         main_topology = config_manager.get_parameter('topology')
         md_results_dir = config_manager.get_parameter('md_results_dir')
         structure_file = str(Path(md_results_dir) / 'md.gro')
-        output_topology = "processed.top"
+        
+        # Create output directory for task
+        output_dir = Path(config_manager.get_parameter('output_dir'))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate processed.top in task directory
+        output_topology = str(output_dir / "processed.top")
         
         # Merge topology files
         success = merge_topology_files(
@@ -167,7 +178,10 @@ def run_solute_selection(config_manager, solute_data, merged_topology, verbose=F
         
         # Modify merged topology file
         input_topology = merged_topology
-        output_topology = config_manager.get_parameter('output_tpr', 'rest2_topol.top')
+        
+        # Generate rest2_topol.top in task directory
+        output_dir = Path(config_manager.get_parameter('output_dir'))
+        output_topology = str(output_dir / "rest2_topol.top")
         
         selector.modify_topology_file(input_topology, output_topology)
         
@@ -230,7 +244,8 @@ def run_temperature_control(config_manager, replica_data, solute_data, verbose=F
         controller.print_temperature_summary()
         
         # Generate scaled topology files
-        base_topology = config_manager.get_parameter('output_tpr', 'rest2_topol.top')
+        output_dir = Path(config_manager.get_parameter('output_dir'))
+        base_topology = str(output_dir / "rest2_topol.top")
         controller.generate_scaled_topology_files(base_topology)
         
         # Generate MDP files
