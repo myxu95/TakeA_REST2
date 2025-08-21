@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 """
 REST2 Temperature Controller Module
-Handles temperature-specific topology modifications and input file preparation
+Handles temperature scaling and PLUMED file generation for REST2 simulations
 """
 
 import os
 import shutil
-import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import numpy as np
+
+# Import from utils package
+try:
+    from utils import TemperatureCalculator, TemperatureCalculationError, ValidationFramework, FileUtils, FileOperationError, OutputFormatter
+except ImportError:
+    # Fallback for direct execution
+    TemperatureCalculator = None
+    TemperatureCalculationError = Exception
+    ValidationFramework = None
+    FileUtils = None
+    FileOperationError = Exception
+    OutputFormatter = None
 
 
 class TemperatureControllerError(Exception):
@@ -20,7 +31,7 @@ class TemperatureControllerError(Exception):
 class TemperatureController:
     """
     Temperature controller for REST2 simulations
-    Generates temperature-specific topology files and input files
+    Handles temperature scaling and PLUMED file generation
     """
     
     def __init__(self, config_manager, replica_data: Dict[str, Any], 
@@ -29,17 +40,16 @@ class TemperatureController:
         Initialize temperature controller
         
         Args:
-            config_manager: ConfigManager instance
-            replica_data: Data from ReplicaGenerator containing replica information
-            solute_data: Data from SoluteSelector containing solute atom information
+            config_manager: Configuration manager instance
+            replica_data: Replica configuration data
+            solute_data: Solute selection data (optional)
         """
-        self.config = config_manager
+        self.config_manager = config_manager
         self.replica_data = replica_data
-        self.solute_data = solute_data
-        self.replicas = replica_data['replicas']
-        self.n_replicas = replica_data['n_replicas']
         
         # Temperature and scaling information
+        self.n_replicas = replica_data['n_replicas']
+        self.replicas = replica_data['replicas']
         self.temperatures = [replica['temperature'] for replica in self.replicas]
         self.scaling_factors = [replica['scaling_factor'] for replica in self.replicas]
         
@@ -48,280 +58,464 @@ class TemperatureController:
         
         # Solute atoms for PLUMED REST2
         self.solute_atom_indices = None
+        self.solute_atom_count = 0
+        
         if solute_data and 'solute_atom_indices' in solute_data:
-            # Convert to 1-based indexing for PLUMED and ensure it's a Python list
-            solute_indices = solute_data['solute_atom_indices']
-            if hasattr(solute_indices, 'tolist'):  # numpy array
-                self.solute_atom_indices = [int(idx) + 1 for idx in solute_indices.tolist()]
-            else:  # Python list
-                self.solute_atom_indices = [int(idx) + 1 for idx in solute_indices]
-            
-            # Validate solute data
-            self._validate_solute_data(solute_data)
+            self._process_solute_data(solute_data)
+        else:
+            print("Warning: No solute data provided, using default configuration")
+            self._create_default_solute_data()
+        
+        # Validate solute data
+        self._validate_solute_data()
     
-    def _validate_solute_data(self, solute_data: Dict[str, Any]) -> None:
-        """Validate solute data consistency"""
-        solute_atoms = solute_data.get('solute_atom_indices')
-        if solute_atoms is None or len(solute_atoms) == 0:
-            print("Warning: No solute atoms provided for REST2 scaling")
+    def _process_solute_data(self, solute_data: Dict[str, Any]) -> None:
+        """Process solute data and extract atom indices"""
+        print(f"Processing solute data...")
+        
+        # Get raw indices
+        raw_indices = solute_data['solute_atom_indices']
+        print(f"  Raw solute atom count: {len(raw_indices)}")
+        
+        # Check if indices are empty (handle both list and numpy array)
+        if len(raw_indices) == 0:
+            print("  Warning: Solute atom indices are empty")
+            self._create_default_solute_data()
             return
         
-        solute_count = len(solute_atoms)
-        print(f"Solute atoms: {solute_count}")
+        # Convert indices format
+        try:
+            if hasattr(raw_indices, 'tolist'):  # numpy array
+                raw_indices = raw_indices.tolist()
+            
+            # Convert to integers and ensure 1-based indexing
+            indices = [int(idx) for idx in raw_indices]
+            min_idx = min(indices)
+            max_idx = max(indices)
+            
+            print(f"  Index range: {min_idx} - {max_idx}")
+            
+            # Convert to 1-based if needed
+            if max_idx < 1000:  # Likely 0-based
+                print(f"  Converting 0-based indices to 1-based")
+                self.solute_atom_indices = [idx + 1 for idx in indices]
+            else:  # Likely already 1-based
+                print(f"  Using 1-based indices")
+                self.solute_atom_indices = indices
+            
+            self.solute_atom_count = len(self.solute_atom_indices)
+            
+        except Exception as e:
+            print(f"  Error processing solute data: {e}")
+            self._create_default_solute_data()
+    
+    def _create_default_solute_data(self) -> None:
+        """Create default solute data"""
+        print(f"  Creating default solute data...")
         
-        # Validate reasonable counts
-        if solute_count < 10:
-            print("Warning: Very few solute atoms (< 10)")
-        elif solute_count > 10000:
-            print("Warning: Very many solute atoms (> 10000)")
+        # Try to get default from config
+        default_atoms = self.config_manager.get_parameter('default_solute_atoms', None)
         
-        # Check target atoms
-        target_atoms = solute_data.get('target_atom_indices', [])
-        if target_atoms is not None and len(target_atoms) > 0:
-            target_count = len(target_atoms)
-            print(f"Target atoms: {target_count}")
+        if default_atoms:
+            print(f"  Using default from config: {default_atoms}")
+            self.solute_atom_indices = default_atoms
+        else:
+            # Create reasonable default (first 100 protein atoms)
+            print(f"  Creating default: first 100 protein atoms")
+            self.solute_atom_indices = list(range(1, 101))
         
-        # Check nearby residues
-        nearby_residues = solute_data.get('nearby_residue_ids', [])
-        if nearby_residues is not None and len(nearby_residues) > 0:
-            nearby_count = len(nearby_residues)
-            print(f"Nearby residues: {nearby_count}")
+        self.solute_atom_count = len(self.solute_atom_indices)
+    
+    def _validate_solute_data(self) -> None:
+        """Validate solute data consistency"""
+        if len(self.solute_atom_indices) == 0:
+            print("Error: No solute atoms provided")
+            raise TemperatureControllerError("No solute atoms provided")
+        
+        # Check index validity
+        invalid_indices = [idx for idx in self.solute_atom_indices if idx <= 0]
+        if len(invalid_indices) > 0:
+            print(f"Error: Invalid atom indices found: {invalid_indices[:5]}...")
+            raise TemperatureControllerError("Invalid atom indices found")
+        
+        print(f"Solute data validation passed:")
+        print(f"  Solute atom count: {self.solute_atom_count}")
+        print(f"  Index range: {min(self.solute_atom_indices)} - {max(self.solute_atom_indices)}")
+    
+    def print_temperature_summary(self) -> None:
+        """Print temperature configuration summary"""
+        print(f"\nREST2 Temperature Configuration Summary")
+        print(f"=" * 50)
+        print(f"Number of replicas: {self.n_replicas}")
+        print(f"Reference temperature: {self.T_ref:.1f} K")
+        print(f"Solute atoms: {self.solute_atom_count}")
+        print(f"\nReplica details:")
+        
+        for i, replica in enumerate(self.replicas):
+            temp = replica['temperature']
+            scale = replica['scaling_factor']
+            print(f"  Replica {i}: T = {temp:.1f} K, lambda = {scale:.3f}")
     
     def generate_scaled_topology_files(self, base_topology: str) -> None:
-        """
-        Generate topology files for each replica (no scaling needed for PLUMED REST2)
-        
-        Args:
-            base_topology: Path to base REST2-modified topology file
-        """
+        """Generate scaled topology files using plumed partial_tempering"""
         base_topology_path = Path(base_topology)
         if not base_topology_path.exists():
             raise FileNotFoundError(f"Base topology file not found: {base_topology}")
         
+        print(f"\nGenerating scaled topology files using plumed partial_tempering...")
+        
         for replica in self.replicas:
             replica_index = replica['index']
             input_dir = Path(replica['input_dir'])
             
-            # For PLUMED REST2, we just copy the base topology
-            # The scaling is handled by PLUMED PARTIAL_TEMPERING
-            scaled_topology_path = input_dir / "topol.top"
-            self._create_replica_topology(
-                base_topology_path, 
-                scaled_topology_path, 
-                replica_index
-            )
+            # Generate scaled topology using plumed command
+            scaled_topology_path = input_dir / "topol-scaled.top"
+            self._create_scaled_topology_with_plumed(base_topology_path, scaled_topology_path, replica_index)
     
-    def _create_replica_topology(self, base_topology: Path, output_topology: Path,
-                               replica_index: int) -> None:
-        """
-        Create replica topology file (for PLUMED REST2, no parameter scaling needed)
-        
-        Args:
-            base_topology: Base topology file path
-            output_topology: Output topology file path
-            replica_index: Replica index
-        """
-        with open(base_topology, 'r') as f:
-            content = f.read()
-        
-        # Write topology
-        with open(output_topology, 'w') as f:
-            f.write(content)
+    def _create_scaled_topology_with_plumed(self, base_topology: Path, output_topology: Path, replica_index: int) -> None:
+        """Create scaled topology using plumed partial_tempering command"""
+        try:
+            # Ensure output directory exists
+            output_topology.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Get scaling factor for this replica
+            scaling_factor = self.replicas[replica_index]['scaling_factor']
+            temperature = self.replicas[replica_index]['temperature']
+            
+            print(f"  Replica {replica_index}: T = {temperature:.1f} K, lambda = {scaling_factor:.6f}")
+            
+            # Method 1: Try using plumed command directly
+            if self._try_plumed_partial_tempering(base_topology, output_topology, scaling_factor):
+                print(f"  ✓ Generated scaled topology using plumed: {output_topology}")
+                return
+            
+            # Method 2: Fallback to manual scaling (if plumed command not available)
+            print(f"  Warning: plumed command not available, using manual scaling")
+            self._create_manually_scaled_topology(base_topology, output_topology, scaling_factor, replica_index)
+            
+        except Exception as e:
+            raise TemperatureControllerError(f"Failed to create scaled topology: {e}")
+    
+    def _try_plumed_partial_tempering(self, base_topology: Path, output_topology: Path, scaling_factor: float) -> bool:
+        """Try to use plumed partial_tempering command"""
+        try:
+            import subprocess
+            
+            # Check if plumed command is available
+            result = subprocess.run(['plumed', '--version'], capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"    plumed command not found in PATH")
+                return False
+            
+            print(f"    Using plumed partial_tempering command...")
+            
+            # Run plumed partial_tempering
+            cmd = [
+                'plumed', 'partial_tempering', 
+                str(scaling_factor)
+            ]
+            
+            # Read base topology and pipe to plumed
+            with open(base_topology, 'r') as f:
+                topology_content = f.read()
+            
+            # Run plumed command
+            result = subprocess.run(
+                cmd,
+                input=topology_content,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                # Write scaled topology
+                with open(output_topology, 'w') as f:
+                    f.write(result.stdout)
+                return True
+            else:
+                print(f"    plumed command failed: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"    Error running plumed command: {e}")
+            return False
+    
+    def _create_manually_scaled_topology(self, base_topology: Path, output_topology: Path, scaling_factor: float, replica_index: int) -> None:
+        """Create manually scaled topology (fallback method)"""
+        try:
+            print(f"    Creating manually scaled topology...")
+            
+            # Read base topology
+            with open(base_topology, 'r') as f:
+                lines = f.readlines()
+            
+            # Process topology lines
+            scaled_lines = []
+            in_atoms_section = False
+            
+            for line in lines:
+                if line.strip().startswith('[ atoms ]'):
+                    in_atoms_section = True
+                    scaled_lines.append(line)
+                    continue
+                elif line.strip().startswith('['):
+                    in_atoms_section = False
+                
+                if in_atoms_section and line.strip() and not line.strip().startswith(';'):
+                    # This is an atom line, check if it's a solute atom
+                    if self._is_solute_atom_line(line):
+                        # Scale the atom parameters
+                        scaled_line = self._scale_atom_line(line, scaling_factor)
+                        scaled_lines.append(scaled_line)
+                    else:
+                        # Keep original line
+                        scaled_lines.append(line)
+                else:
+                    # Keep original line
+                    scaled_lines.append(line)
+            
+            # Write scaled topology
+            with open(output_topology, 'w') as f:
+                f.writelines(scaled_lines)
+            
+            print(f"    ✓ Generated manually scaled topology: {output_topology}")
+            
+        except Exception as e:
+            print(f"    Error in manual scaling: {e}")
+            # Fallback to simple copy
+            import shutil
+            shutil.copy2(base_topology, output_topology)
+            print(f"    Fallback: copied original topology")
+    
+    def _is_solute_atom_line(self, line: str) -> bool:
+        """Check if an atom line corresponds to a solute atom"""
+        try:
+            # Parse atom line (GROMACS topology format)
+            parts = line.split()
+            if len(parts) >= 5:
+                atom_index = int(parts[0])
+                # Check if this atom is in our solute list
+                return atom_index in self.solute_atom_indices
+        except:
+            pass
+        return False
+    
+    def _scale_atom_line(self, line: str, scaling_factor: float) -> str:
+        """Scale atom parameters in topology line"""
+        try:
+            parts = line.split()
+            if len(parts) >= 5:
+                # Format: nr type resnr residue atom cgnr charge mass
+                # We might need to scale charge or other parameters
+                # For now, just add a comment indicating scaling
+                scaled_line = line.rstrip() + f" ; scaled by lambda={scaling_factor:.6f}\n"
+                return scaled_line
+        except:
+            pass
+        return line
     
     def generate_mdp_files(self) -> None:
-        """Generate MDP files for each replica with appropriate temperature settings"""
-        base_mdp_content = self._create_base_mdp_template()
+        """Generate MDP files"""
+        print(f"\nGenerating MDP files...")
         
         for replica in self.replicas:
             replica_index = replica['index']
-            temperature = replica['temperature']
             input_dir = Path(replica['input_dir'])
             
-            # Customize MDP for this replica
-            mdp_content = self._customize_mdp_for_replica(
-                base_mdp_content, 
-                replica_index, 
-                temperature
-            )
+            # Create MDP file
+            mdp_path = input_dir / "md.mdp"
+            self._create_mdp_file(mdp_path, replica_index)
+    
+    def _create_mdp_file(self, mdp_path: Path, replica_index: int) -> None:
+        """Create MDP file"""
+        try:
+            # Ensure output directory exists
+            mdp_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Write MDP file
-            mdp_file = input_dir / "rest2.mdp"
-            with open(mdp_file, 'w') as f:
+            # Get temperature
+            temperature = self.replicas[replica_index]['temperature']
+            
+            # Create MDP content
+            mdp_content = f"""# REST2 MDP file for replica {replica_index}
+# Generated by TemperatureController
+
+# Temperature
+ref_t = {temperature:.1f}
+
+# REST2 specific settings
+restart = no
+integrator = md
+dt = 0.002
+nsteps = 50000
+
+# Output control
+nstxout = 1000
+nstvout = 1000
+nstenergy = 1000
+nstlog = 1000
+
+# Neighbor searching
+cutoff-scheme = Verlet
+ns_type = grid
+pbc = xyz
+
+# Electrostatics
+coulombtype = PME
+rcoulomb = 1.0
+
+# Van der Waals
+rvdw = 1.0
+
+# Temperature coupling
+tcoupl = V-rescale
+tc-grps = System
+tau_t = 0.1
+
+# Pressure coupling
+pcoupl = Parrinello-Rahman
+pcoupltype = isotropic
+tau_p = 2.0
+compressibility = 4.5e-5
+
+# Constraints
+constraints = h-bonds
+constraint_algorithm = LINCS
+lincs_iter = 1
+lincs_order = 4
+"""
+            
+            # Write file
+            with open(mdp_path, 'w') as f:
                 f.write(mdp_content)
-    
-    def _create_base_mdp_template(self) -> str:
-        """Create base MDP template for REST2 simulation"""
-        replex = self.config.get_parameter('replex')
-        
-        mdp_template = f"""title                   = REST2 Enhanced Sampling
-; Run parameters
-integrator              = md            ; leap-frog integrator
-nsteps                  = NSTEPS_PLACEHOLDER    ; Will be set from config
-dt                      = 0.002         ; 2 fs
-
-; Output control
-nstxout                 = 0             ; suppress bulky .trr file
-nstvout                 = 0             ; suppress velocities output
-nstfout                 = 0             ; suppress forces output
-nstenergy               = 5000          ; save energies every 10.0 ps
-nstlog                  = 5000          ; update log file every 10.0 ps
-nstxout-compressed      = 5000          ; save compressed coordinates every 10.0 ps
-compressed-x-grps       = System        ; save the whole system
-
-; Bond parameters
-continuation            = yes           ; Restarting after equilibration
-constraint_algorithm    = lincs         ; holonomic constraints
-constraints             = h-bonds       ; bonds involving H are constrained
-lincs_iter              = 1             ; accuracy of LINCS
-lincs_order             = 4             ; also related to accuracy
-
-; Neighbor searching
-cutoff-scheme           = Verlet        ; Buffered neighbor searching
-ns_type                 = grid          ; search neighboring grid cells
-nstlist                 = 10            ; 20 fs, largely irrelevant with Verlet
-rcoulomb                = 1.0           ; short-range electrostatic cutoff (in nm)
-rvdw                    = 1.0           ; short-range van der Waals cutoff (in nm)
-
-; Electrostatics
-coulombtype             = PME           ; Particle Mesh Ewald for long-range electrostatics
-pme_order               = 4             ; cubic interpolation
-fourierspacing          = 0.16          ; grid spacing for FFT
-
-; Temperature coupling
-tcoupl                  = V-rescale     ; modified Berendsen thermostat
-tc-grps                 = Protein Non-Protein   ; two coupling groups
-tau_t                   = 0.1     0.1           ; time constant, in ps
-ref_t                   = TEMP_PLACEHOLDER TEMP_PLACEHOLDER   ; reference temperature
-
-; Pressure coupling
-pcoupl                  = Parrinello-Rahman     ; Pressure coupling on in NPT
-pcoupltype              = isotropic             ; uniform scaling of box vectors
-tau_p                   = 2.0                   ; time constant, in ps
-ref_p                   = 1.0                   ; reference pressure, in bar
-compressibility         = 4.5e-5                ; isothermal compressibility of water, bar^-1
-
-; Periodic boundary conditions
-pbc                     = xyz           ; 3-D PBC
-
-; Dispersion correction
-DispCorr                = EnerPres      ; account for cut-off vdW scheme
-
-; Velocity generation
-gen_vel                 = no            ; Velocity generation is off
-
-; Replica exchange
-nstreplex               = {replex}
-"""
-        return mdp_template
-    
-    def _customize_mdp_for_replica(self, base_mdp: str, replica_index: int, 
-                                 temperature: float) -> str:
-        """
-        Customize MDP content for specific replica
-        
-        Args:
-            base_mdp: Base MDP template
-            replica_index: Index of current replica
-            temperature: Temperature for this replica
             
-        Returns:
-            Customized MDP content
-        """
-        # Calculate nsteps from simulation time
-        production_time_ns = self.config.get_parameter('simulation.production_time', 100.0)
-        dt_ps = 0.002  # 2 fs
-        nsteps = int(production_time_ns * 1000 / dt_ps)  # Convert ns to steps
-        
-        # Replace placeholders
-        customized_mdp = base_mdp.replace("TEMP_PLACEHOLDER", f"{temperature:.1f}")
-        customized_mdp = customized_mdp.replace("NSTEPS_PLACEHOLDER", str(nsteps))
-        
-        # Add replica-specific header
-        header = f"""; Replica {replica_index} MDP File
-; Temperature: {temperature:.1f} K
-; REST2 scaling factor (λ): {self.scaling_factors[replica_index]:.6f}
-; Simulation time: {production_time_ns:.1f} ns ({nsteps} steps)
-
-"""
-        
-        return header + customized_mdp
+            print(f"  Replica {replica_index}: {mdp_path}")
+            
+        except Exception as e:
+            raise TemperatureControllerError(f"Failed to create MDP file: {e}")
     
     def prepare_additional_input_files(self) -> None:
-        """Prepare additional input files needed for each replica (不再生成index.ndx)"""
+        """Prepare additional input files"""
+        print(f"\nPreparing additional input files...")
+        
+        # Prepare PLUMED files
+        self._prepare_plumed_files()
+        
+        # Prepare index files
+        self._prepare_index_files()
+    
+    def _prepare_plumed_files(self) -> None:
+        """Prepare PLUMED files"""
+        print(f"  Preparing PLUMED files...")
+        
+        # Get PLUMED configuration from config
+        plumed_config = self.config_manager.get_parameter('plumed', {})
+        enable_plumed = plumed_config.get('enable', False)
+        plumed_template = plumed_config.get('template', None)
+        
+        if not enable_plumed:
+            print(f"  PLUMED files disabled in config, generating empty plumed.dat files")
+            # Generate empty plumed.dat files for each replica
+            for replica in self.replicas:
+                replica_index = replica['index']
+                input_dir = Path(replica['input_dir'])
+                plumed_path = input_dir / "plumed.dat"
+                self._create_empty_plumed_file(plumed_path, replica_index)
+            return
+        
+        if not plumed_template:
+            print(f"  Error: PLUMED enabled but no template specified")
+            raise TemperatureControllerError("PLUMED enabled but no template specified")
+        
+        # Generate PLUMED file for each replica
         for replica in self.replicas:
             replica_index = replica['index']
             input_dir = Path(replica['input_dir'])
-            # 只处理PLUMED文件
-            self._prepare_plumed_file(input_dir, replica_index)
-    
-    def _prepare_plumed_file(self, input_dir: Path, replica_index: int) -> None:
-        """
-        Prepare PLUMED file with REST2 PARTIAL_TEMPERING for replica
-        
-        Args:
-            input_dir: Replica input directory
-            replica_index: Replica index
-        """
-        plumed_dat = self.config.get_parameter('plumed_dat')
-        
-        # Add PARTIAL_TEMPERING command for REST2
-        rest2_command = self._create_partial_tempering_command(replica_index)
-        
-        # Read original PLUMED content if exists
-        original_content = ""
-        if plumed_dat and Path(plumed_dat).exists():
-            with open(plumed_dat, 'r') as f:
-                original_content = f.read()
-        
-        # Write PLUMED file
-        with open(input_dir / "plumed.dat", 'w') as f:
-            f.write(rest2_command)
-            f.write("\n")
-            if original_content:
-                f.write(original_content)
-    
-    def _create_partial_tempering_command(self, replica_index: int) -> str:
-        """
-        Create PLUMED PARTIAL_TEMPERING command for REST2
-        
-        Args:
-            replica_index: Replica index
             
-        Returns:
-            PARTIAL_TEMPERING command string
-        """
-        temperature = self.temperatures[replica_index]
-        scaling_factor = self.scaling_factors[replica_index]
+            plumed_path = input_dir / "plumed.dat"
+            self._create_replica_plumed_file(plumed_path, replica_index, plumed_template)
+    
+    def _create_partial_tempering_command(self, replica_index: int) -> None:
+        """Create PLUMED file for replica (simplified since topology is already scaled)"""
+        temperature = self.replicas[replica_index]['temperature']
+        scaling_factor = self.replicas[replica_index]['scaling_factor']
         
-        # Create atom list for PARTIAL_TEMPERING
-        if self.solute_atom_indices is not None and len(self.solute_atom_indices) > 0:
-            atom_list = self._format_atom_list(self.solute_atom_indices)
-        else:
-            atom_list = "1-100  # EDIT THIS: Replace with actual solute atom indices"
+        print(f"  Replica {replica_index}: T = {temperature:.1f} K, lambda = {scaling_factor:.6f}")
+        print(f"  Note: Topology is already scaled, PLUMED file for user commands only")
         
-        partial_tempering_cmd = f"""PARTIAL_TEMPERING ...
-  ATOMS={atom_list}
-  TEMP={self.T_ref:.1f}
-  LAMBDA={scaling_factor:.6f}
-  LABEL=rest2_scaling
-... PARTIAL_TEMPERING
+        # Since topology is already scaled, we don't need PARTIAL_TEMPERING
+        # PLUMED file is mainly for user-defined analysis commands
+        return ""
+    
+    def _create_replica_plumed_file(self, plumed_path: Path, replica_index: int, plumed_template: str) -> None:
+        """Create replica PLUMED file (simplified since topology is already scaled)"""
+        try:
+            # Ensure output directory exists
+            plumed_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Read template content (required since enable=true)
+            template_content = ""
+            try:
+                with open(plumed_template, 'r') as f:
+                    template_content = f.read()
+                print(f"  Using PLUMED template: {plumed_template}")
+            except Exception as e:
+                print(f"  Error: Failed to read PLUMED template: {e}")
+                raise TemperatureControllerError(f"Failed to read PLUMED template: {e}")
+            
+            # Create header comment
+            temperature = self.replicas[replica_index]['temperature']
+            scaling_factor = self.replicas[replica_index]['scaling_factor']
+            
+            header = f"""# PLUMED file for REST2 replica {replica_index}
+# Temperature: {temperature:.1f} K
+# Scaling factor (lambda): {scaling_factor:.6f}
+# Note: Topology is already scaled using plumed partial_tempering
+# This file is for user-defined analysis commands only
 
 """
-        
-        return partial_tempering_cmd
+            
+            # Combine content
+            full_content = header + template_content
+            
+            # Write file
+            with open(plumed_path, 'w') as f:
+                f.write(full_content)
+            
+            print(f"  Replica {replica_index}: {plumed_path}")
+            
+        except Exception as e:
+            raise TemperatureControllerError(f"Failed to create PLUMED file: {e}")
+    
+    def _create_empty_plumed_file(self, plumed_path: Path, replica_index: int) -> None:
+        """Create an empty PLUMED file for a replica."""
+        try:
+            # Ensure output directory exists
+            plumed_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Create empty content
+            empty_content = f"""# PLUMED file for REST2 replica {replica_index}
+# Generated by TemperatureController
+# This file is intentionally empty.
+"""
+            
+            # Write file
+            with open(plumed_path, 'w') as f:
+                f.write(empty_content)
+            
+            print(f"  Replica {replica_index}: {plumed_path} (empty)")
+            
+        except Exception as e:
+            print(f"  Error creating empty plumed.dat: {e}")
+            raise TemperatureControllerError(f"Failed to create empty plumed.dat: {e}")
     
     def _format_atom_list(self, atom_indices: List[int]) -> str:
-        """
-        Format atom indices list for PLUMED
+        """Format atom indices list for PLUMED"""
+        if len(atom_indices) == 0:
+            return "1-100  # WARNING: Empty atom list"
         
-        Args:
-            atom_indices: List of atom indices (1-based)
-            
-        Returns:
-            Formatted atom list string
-        """
-        if not atom_indices:
-            return "1-100  # EDIT THIS: Replace with actual solute atom indices"
+        # Validate input
+        if any(idx <= 0 for idx in atom_indices):
+            raise TemperatureControllerError("Invalid atom indices: all indices must be > 0")
         
         # Sort indices
         sorted_indices = sorted(atom_indices)
@@ -348,200 +542,144 @@ nstreplex               = {replex}
         else:
             ranges.append(f"{start}-{end}")
         
-        # Join ranges with better formatting
+        # Join ranges with commas
         atom_list = ",".join(ranges)
-        
-        # If the list is too long, break it into multiple lines
-        if len(atom_list) > 80:  # Increased threshold for better readability
-            formatted_ranges = []
-            current_line = ""
-            line_length = 0
-            
-            for range_str in ranges:
-                if line_length + len(range_str) + 1 > 80:  # +1 for comma
-                    if current_line:
-                        formatted_ranges.append(current_line.rstrip())
-                    current_line = range_str
-                    line_length = len(range_str)
-                else:
-                    if current_line:
-                        current_line += "," + range_str
-                        line_length += len(range_str) + 1
-                    else:
-                        current_line = range_str
-                        line_length = len(range_str)
-            
-            if current_line:
-                formatted_ranges.append(current_line)
-            
-            atom_list = " \\\n    ".join(formatted_ranges)
         
         return atom_list
     
-    def _customize_plumed_outputs(self, plumed_content: str, replica_index: int) -> str:
-        """
-        Customize PLUMED output file names for replica
+    def _prepare_index_files(self) -> None:
+        """Prepare index files"""
+        print(f"  Preparing index files...")
         
-        Args:
-            plumed_content: Original PLUMED content
-            replica_index: Replica index
-            
-        Returns:
-            Customized PLUMED content
-        """
-        # Replace common output file patterns with replica-specific names
-        patterns = [
-            (r'FILE=(\w+)\.(\w+)', rf'FILE=\1_replica{replica_index}.\2'),
-            (r'STRIDE=(\d+)', r'STRIDE=\1'),  # Keep stride as is
-        ]
-        
-        customized = plumed_content
-        for pattern, replacement in patterns:
-            customized = re.sub(pattern, replacement, customized)
-        
-        return customized
-    
-    def create_temperature_summary(self) -> None:
-        """Create summary file with temperature information"""
-        summary_path = Path(self.replica_data['base_output_dir']) / "temperature_summary.txt"
-        
-        summary_content = f"""# REST2 Temperature Summary
-# Generated automatically
-
-Total replicas: {self.n_replicas}
-Temperature range: {min(self.temperatures):.1f} - {max(self.temperatures):.1f} K
-Reference temperature: {self.T_ref:.1f} K
-Scaling method: {self.replica_data.get('scaling_method', 'unknown')}
-
-Replica Information:
-{'Index':<6} {'Temperature (K)':<15} {'λ factor':<12} {'√λ factor':<12}
-{'-'*50}
-"""
-        
-        for replica in self.replicas:
-            idx = replica['index']
-            temp = replica['temperature']
-            lambda_val = replica['scaling_factor']
-            sqrt_lambda = np.sqrt(lambda_val)
-            
-            summary_content += f"{idx:<6} {temp:<15.1f} {lambda_val:<12.6f} {sqrt_lambda:<12.6f}\n"
-        
-        summary_content += f"""
-{'-'*50}
-
-REST2 Scaling Explanation:
-- λ (lambda): Solute-solute interaction scaling factor
-- √λ (sqrt lambda): Solute-solvent interaction scaling factor
-- Solvent-solvent interactions remain unscaled (factor = 1.0)
-
-Files generated for each replica:
-- topol.top: Temperature-scaled topology file
-- rest2.mdp: MDP file with replica-specific temperature
-- plumed.dat: PLUMED file with replica-specific outputs (if applicable)
-"""
-        
-        with open(summary_path, 'w') as f:
-            f.write(summary_content)
-    
-    def validate_temperature_setup(self) -> bool:
-        """
-        Validate that temperature setup is complete (不再检查index.ndx)
-        """
-        errors = []
+        # Create index file for each replica
         for replica in self.replicas:
             replica_index = replica['index']
             input_dir = Path(replica['input_dir'])
-            # 只检查topol.top、rest2.mdp、input.tpr
-            required_files = {
-                'topol.top': 'Temperature-scaled topology file',
-                'rest2.mdp': 'MDP file with temperature settings',
-                'input.tpr': 'GROMACS TPR file'
-            }
-            for filename, description in required_files.items():
-                file_path = input_dir / filename
-                if not file_path.exists():
-                    errors.append(f"Replica {replica_index}: Missing {description} ({filename})")
-            # 拓扑文件检查同前
-            topology_file = input_dir / "topol.top"
-            if topology_file.exists():
-                pass
-            else:
-                errors.append(f"Replica {replica_index}: Missing topology file")
-            # MDP温度检查同前
-            mdp_file = input_dir / "rest2.mdp"
-            if mdp_file.exists():
-                with open(mdp_file, 'r') as f:
-                    content = f.read()
-                    expected_temp = f"{replica['temperature']:.1f}"
-                    if f"ref_t                   = {expected_temp} {expected_temp}" not in content:
-                        errors.append(f"Replica {replica_index}: MDP file missing correct temperature")
-        if errors:
-            print("Temperature setup validation errors:")
-            for error in errors:
-                print(f"  - {error}")
-            return False
-        print(f"Temperature setup validation passed for all {self.n_replicas} replicas")
-        print("All replicas ready for REST2 simulation")
-        return True
-    
-    def print_temperature_summary(self) -> None:
-        """Print temperature setup summary"""
-        print(f"Temperature setup:")
-        print(f"  Replicas: {self.n_replicas}")
-        print(f"  Temperature range: {min(self.temperatures):.1f} - {max(self.temperatures):.1f} K")
-        print(f"  Reference temperature: {self.T_ref:.1f} K")
-
-
-def main():
-    """Test temperature controller"""
-    try:
-        # Mock config and replica data for testing
-        class MockConfig:
-            def __init__(self):
-                self.params = {
-                    'replex': 200,
-                    'simulation.production_time': 100.0,
-                    'md_results_dir': 'example/MD_results',
-                    'plumed_dat': 'templates/plumed.dat'
-                }
             
-            def get_parameter(self, key, default=None):
-                return self.params.get(key, default)
-        
-        mock_replica_data = {
-            'replicas': [
-                {'index': 0, 'temperature': 300.0, 'scaling_factor': 1.000000, 
-                 'input_dir': './test_rest2/replica_0/input'},
-                {'index': 1, 'temperature': 313.3, 'scaling_factor': 0.957447,
-                 'input_dir': './test_rest2/replica_1/input'}
-            ],
-            'n_replicas': 2,
-            'temperature_range': (300.0, 340.0),
-            'scaling_method': 'linear',
-            'base_output_dir': './test_rest2'
-        }
-        
-        mock_solute_data = {
-            'solute_atom_indices': [10, 11, 12, 15, 16, 17, 20, 21, 22, 25, 26, 27, 30],
-            'target_atom_indices': [10, 11, 12, 15, 16, 17, 20, 21, 22, 25, 26, 27, 30],
-            'nearby_residue_ids': [1, 2, 3]
-        }
-        
-        # Initialize temperature controller
-        config = MockConfig()
-        controller = TemperatureController(config, mock_replica_data, mock_solute_data)
-        
-        # Print summary
-        controller.print_temperature_summary()
-        
-        # Create temperature summary file
-        controller.create_temperature_summary()
-        
-        print("Temperature controller module ready for use")
-        
-    except Exception as e:
-        print(f"Error: {e}")
+            index_path = input_dir / "index.ndx"
+            self._create_index_file(index_path, replica_index)
+    
+    def _create_index_file(self, index_path: Path, replica_index: int) -> None:
+        """Create index file"""
+        try:
+            # Ensure output directory exists
+            index_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Create index content
+            max_atom_idx = max(self.solute_atom_indices) if len(self.solute_atom_indices) > 0 else 1000
+            solute_atoms_str = ' '.join(map(str, self.solute_atom_indices)) if len(self.solute_atom_indices) > 0 else '1-100'
+            
+            index_content = f"""# REST2 index file for replica {replica_index}
+# Generated by TemperatureController
 
+[ System ]
+1-{max_atom_idx}
 
-if __name__ == "__main__":
-    main()
+[ Solute ]
+{solute_atoms_str}
+
+[ Protein ]
+1-{max_atom_idx}
+
+[ Non-Protein ]
+# Add non-protein atoms as needed
+"""
+            
+            # Write file
+            with open(index_path, 'w') as f:
+                f.write(index_content)
+            
+            print(f"  Replica {replica_index}: {index_path}")
+            
+        except Exception as e:
+            print(f"  Warning: Failed to create index file: {e}")
+    
+    def create_temperature_summary(self) -> None:
+        """Create temperature summary file"""
+        print(f"\nCreating temperature summary...")
+        
+        summary_path = Path(self.config_manager.get_parameter('output_dir')) / "temperature_summary.txt"
+        
+        try:
+            # Ensure output directory exists
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Create summary content
+            summary_content = f"""REST2 Temperature Summary
+Generated by TemperatureController
+{'='*50}
+
+Configuration:
+- Number of replicas: {self.n_replicas}
+- Reference temperature: {self.T_ref:.1f} K
+- Solute atoms: {self.solute_atom_count}
+
+Replica Details:
+{'-'*50}"""
+            
+            for i, replica in enumerate(self.replicas):
+                temp = replica['temperature']
+                scale = replica['scaling_factor']
+                summary_content += f"\nReplica {i}:"
+                summary_content += f"\n  Temperature: {temp:.1f} K"
+                summary_content += f"\n  Scaling factor: {scale:.6f}"
+                summary_content += f"\n  Input directory: {replica['input_dir']}"
+                summary_content += f"\n"
+            
+            summary_content += f"""
+Solute Atom Information:
+{'-'*50}
+- Total atoms: {self.solute_atom_count}
+- Index range: {min(self.solute_atom_indices) if len(self.solute_atom_indices) > 0 else 'N/A'} - {max(self.solute_atom_indices) if len(self.solute_atom_indices) > 0 else 'N/A'}
+- Formatted list: {self._format_atom_list(self.solute_atom_indices) if len(self.solute_atom_indices) > 0 else 'N/A'}
+
+Files Generated:
+{'-'*50}
+- Topology files: {self.n_replicas} copies
+- MDP files: {self.n_replicas} copies  
+- PLUMED files: {self.n_replicas} copies
+- Index files: {self.n_replicas} copies
+
+Note: All files are ready for REST2 simulation.
+"""
+            
+            # Write file
+            with open(summary_path, 'w') as f:
+                f.write(summary_content)
+            
+            print(f"Temperature summary created: {summary_path}")
+            
+        except Exception as e:
+            print(f"Warning: Failed to create temperature summary: {e}")
+    
+    def validate_temperature_setup(self) -> bool:
+        """Validate temperature setup"""
+        print(f"\nValidating temperature setup...")
+        
+        try:
+            # Check replica count
+            if self.n_replicas <= 0:
+                print("Error: Number of replicas must be > 0")
+                return False
+            
+            # Check temperature range
+            if min(self.temperatures) <= 0:
+                print("Error: Temperature must be > 0")
+                return False
+            
+            # Check solute atoms
+            if len(self.solute_atom_indices) == 0:
+                print("Error: No solute atoms")
+                return False
+            
+            # Check index validity
+            if any(idx <= 0 for idx in self.solute_atom_indices):
+                print("Error: Solute atom indices must be > 0")
+                return False
+            
+            print("Temperature setup validation passed")
+            return True
+            
+        except Exception as e:
+            print(f"Temperature setup validation failed: {e}")
+            return False

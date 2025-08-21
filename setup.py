@@ -17,7 +17,7 @@ def read_requirements():
         return [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="rest2-enhanced-sampling",
+    name="takeA_rest2",
     version="1.0.0",
     author="REST2 Project Team",
     author_email="",

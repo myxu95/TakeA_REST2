@@ -55,17 +55,17 @@ class GromacsRunner:
         
         script_content = f"""#!/bin/bash
 #SBATCH --job-name=REST2
+#SBATCH -p multi
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task={self.n_cpus}
+#SBATCH --exclude=node1,node2,node3,node4,node5,node6,node7,node8,node9,node10,node11,node12,node13,node14,node15
 #SBATCH --gres=gpu:{self.n_gpus}
-#SBATCH --time=48:00:00
-#SBATCH --mem-per-cpu=4G
+#SBATCH --time=7-00:00:00
 
 # Load modules (adjust for your cluster)
-# module load gromacs/2023
-# module load plumed/2.8
+export OMP_NUM_THREADS=4
+module load gromacs/2024.2-mpi
 
-export OMP_NUM_THREADS=1
 cd $SLURM_SUBMIT_DIR
 
 # Set GPU IDs (use specified number of GPUs)
@@ -86,8 +86,9 @@ mpirun -np {self.n_replicas} --oversubscribe {self.gmx_mpi_command} mdrun \\
     -s input/input.tpr \\
     -multidir {self.multidir_string} \\
     -replex {self.replex} \\
-    -nb gpu -bonded gpu -pme gpu -update gpu \\
-    -npme -1 -hrex{plumed_option} \\
+    -nb gpu -bonded gpu -pme gpu \\
+    -npme -1 -hrex \\
+    -plumed input/{Path(self.plumed_dat).name if self.plumed_dat else "plumed.dat"} \\
     -nsteps {self.nsteps} \\
     -gpu_id "$gpu_ids"
 

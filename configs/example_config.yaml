@@ -29,7 +29,7 @@ force_overwrite: true
 gromacs:
   gmx_mpi_command: gmx_mpi
   n_cpus: 8
-  n_gpus: 8
+  n_gpus: 2
   script_types: [slurm, localrun, test]
 
 # Simulation settings

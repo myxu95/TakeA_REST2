@@ -1,33 +1,33 @@
-# REST2 Enhanced Sampling - Simple Configuration Template
-# Minimal configuration with essential parameters only
+# REST2 Enhanced Sampling - PLUMED Disabled Configuration
+# Configuration with PLUMED files disabled
 
 # Input files
 topology: "example/topol.top"
 input_tpr: "example/md.tpr"
 md_results_dir: "example"
-output_dir: "test_output8"
+output_dir: "300-320K_16_1.5A_output"
 
 # PLUMED configuration
 plumed:
-  enable: true                    # Whether to generate plumed.dat files
-  template: "templates/plumed.dat"  # Template file path (required if enable=true)
+  enable: false                    # PLUMED files disabled
+  # template: not needed when enable=false
 
 # Target selection for REST2 scaling
 target_selection: "chainid C"
-distance_range: 4.0
+distance_range: 1.5
 
 # REST2 parameters
-n_replicas: 8
+n_replicas: 16
 temperature:
   min: 300.0
-  max: 340.0
+  max: 320.0
 temperature_method: "linear"
 replex: 1000
 
 # GROMACS settings
 gromacs:
   gmx_mpi_command: "gmx_mpi"
-  n_cpus: 8
+  n_cpus: 16
   n_gpus: 4
   script_types: ["slurm", "localrun", "test"]
 

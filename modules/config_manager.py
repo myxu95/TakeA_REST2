@@ -36,32 +36,32 @@ class ConfigManager:
     
     # Default configuration template
     DEFAULT_CONFIG = {
-        # Basic REST2 settings
-        'target_type': 'peptide',  # 'peptide' or 'small_molecule'
-        'T_min': 300.0,            # Minimum temperature (K)
-        'T_max': 340.0,            # Maximum temperature (K)
-        'replex': 200,             # Exchange interval for gmx_mpi -replex
-        'n_replicas': 8,           # Number of replicas
-        'scaling_method': 'linear',  # 'exponential' or 'linear'
+        # 删除所有默认值，只保留键名
+        'target_type': None,
+        'T_min': None,
+        'T_max': None,
+        'replex': None,
+        'n_replicas': None,
+        'scaling_method': None,
         
         # File paths for GROMACS input
-        'input_tpr': None,         # -f: Input .tpr file (from completed MD)
-        'topology': None,          # -p: Topology file (.top)
-        'plumed_dat': 'templates/plumed.dat',  # PLUMED input file (.dat)
-        'output_tpr': None,        # -o: Output topology file for REST2
+        'input_tpr': None,
+        'topology': None,
+        'plumed_dat': None,
+        'output_tpr': None,
         
         # Selection parameters
-        'distance_range': 6.0,     # Cutoff distance for nearby residues (Angstrom)
-        'target_selection': 'chain A',  # Target selection: 'chain A' for peptide or 'resname LIG' for ligand
-        'use_trajectory': False,   # Whether to use trajectory for selection
-        'occupancy_threshold': 0.5, # Threshold for trajectory-based selection
+        'distance_range': None,
+        'target_selection': None,
+        'use_trajectory': None,
+        'occupancy_threshold': None,
         
         # MD results directory structure
-        'md_results_dir': 'example/MD_results',  # Base directory containing MD results
+        'md_results_dir': None,
         
         # Optional parameters
-        'output_dir': './rest2_simulation',
-        'force_overwrite': False
+        'output_dir': None,
+        'force_overwrite': None
     }
     
     # Required MD files structure template
@@ -92,7 +92,7 @@ class ConfigManager:
         if config_file:
             self.load_config(config_file)
         else:
-            self.config = self.DEFAULT_CONFIG.copy()
+            raise ValueError("Config file is required")
     
     def load_config(self, config_file: str) -> None:
         """
@@ -104,21 +104,46 @@ class ConfigManager:
         config_path = Path(config_file)
         
         if not config_path.exists():
-            self.create_default_config(config_file)
-            raise FileNotFoundError(f"Config file created at {config_file}. Please edit and run again.")
+            raise FileNotFoundError(f"Config file not found: {config_file}")
         
         try:
-            if FileUtils:
-                # Use unified file utilities
-                user_config = FileUtils.load_yaml(config_path)
-            else:
-                # Fallback to direct YAML loading
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    user_config = yaml.safe_load(f) or {}
+            # Load YAML configuration
+            with open(config_path, 'r', encoding='utf-8') as f:
+                user_config = yaml.safe_load(f) or {}
             
-            # Merge with defaults
-            self.config = self.DEFAULT_CONFIG.copy()
-            self.config.update(user_config)
+            # Start with empty config
+            self.config = {}
+            
+            # Handle nested temperature configuration
+            if 'temperature' in user_config and isinstance(user_config['temperature'], dict):
+                temp_config = user_config['temperature']
+                if 'min' in temp_config:
+                    self.config['T_min'] = temp_config['min']
+                if 'max' in temp_config:
+                    self.config['T_max'] = temp_config['max']
+                if 'method' in temp_config:
+                    self.config['scaling_method'] = temp_config['method']
+            
+            # Handle temperature_method at top level
+            if 'temperature_method' in user_config:
+                self.config['scaling_method'] = user_config['temperature_method']
+            
+            # Handle nested simulation configuration
+            if 'simulation' in user_config and isinstance(user_config['simulation'], dict):
+                sim_config = user_config['simulation']
+                for key, value in sim_config.items():
+                    self.config[f'simulation.{key}'] = value
+            
+            # Handle nested gromacs configuration
+            if 'gromacs' in user_config and isinstance(user_config['gromacs'], dict):
+                gmx_config = user_config['gromacs']
+                for key, value in gmx_config.items():
+                    self.config[f'gromacs.{key}'] = value
+            
+            # Add all other top-level parameters
+            for key, value in user_config.items():
+                if key not in ['temperature', 'simulation', 'gromacs']:
+                    self.config[key] = value
             
         except Exception as e:
             raise ConfigValidationError(f"Failed to load config: {e}")
@@ -162,40 +187,38 @@ class ConfigManager:
     
     def validate_config(self) -> None:
         """
-        Validate configuration parameters using unified validation framework
+        Validate configuration parameters
         
         Raises:
             ConfigValidationError: If configuration is invalid
         """
-        if ValidationFramework:
-            # Use unified validation framework
-            config_errors = ValidationFramework.validate_configuration(self.config)
-            file_errors = ValidationFramework.validate_file_paths(self.config)
-            
-            all_errors = config_errors + file_errors
-            
-            if all_errors:
-                error_msg = "\n".join(all_errors)
-                raise ConfigValidationError(f"Configuration validation failed:\n{error_msg}")
-        else:
-            # Fallback validation
-            errors = []
-            
-            # Basic parameter validation
+        errors = []
+        
+        # Check for required parameters
+        required_params = ['T_min', 'T_max', 'n_replicas', 'replex', 'distance_range']
+        for param in required_params:
+            if self.config.get(param) is None:
+                errors.append(f"Required parameter '{param}' is missing or None")
+        
+        # Basic parameter validation (only if values are not None)
+        if self.config.get('T_min') is not None and self.config.get('T_max') is not None:
             if self.config['T_min'] >= self.config['T_max']:
                 errors.append("T_min must be less than T_max")
-            
+        
+        if self.config.get('replex') is not None:
             if self.config['replex'] <= 0:
                 errors.append("replex must be positive")
-            
+        
+        if self.config.get('distance_range') is not None:
             if self.config['distance_range'] <= 0:
                 errors.append("distance_range must be positive")
-            
+        
+        if self.config.get('occupancy_threshold') is not None:
             if self.config['occupancy_threshold'] < 0 or self.config['occupancy_threshold'] > 1:
                 errors.append("occupancy_threshold must be between 0 and 1")
-            
-            if errors:
-                raise ConfigValidationError("\n".join(errors))
+        
+        if errors:
+            raise ConfigValidationError("\n".join(errors))
     
     def _auto_detect_files(self, md_dir: Path) -> None:
         """Auto-detect files in MD results directory"""

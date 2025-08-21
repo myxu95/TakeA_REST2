@@ -1,16 +1,16 @@
-# REST2 Enhanced Sampling - Simple Configuration Template
-# Minimal configuration with essential parameters only
+# REST2 Enhanced Sampling - PLUMED Enabled Configuration
+# Configuration with PLUMED files enabled and template specified
 
 # Input files
 topology: "example/topol.top"
 input_tpr: "example/md.tpr"
 md_results_dir: "example"
-output_dir: "test_output8"
+output_dir: "test_output_with_plumed"
 
 # PLUMED configuration
 plumed:
-  enable: true                    # Whether to generate plumed.dat files
-  template: "templates/plumed.dat"  # Template file path (required if enable=true)
+  enable: true                     # PLUMED files enabled
+  template: "templates/plumed.dat"  # Template file path (required when enable=true)
 
 # Target selection for REST2 scaling
 target_selection: "chainid C"
