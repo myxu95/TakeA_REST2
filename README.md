@@ -1,378 +1,522 @@
 # REST2 Enhanced Sampling Automation
 
-Automated setup and execution of REST2 (Replica Exchange with Solute Tempering) enhanced sampling simulations using GROMACS and PLUMED.
+**Automated setup and execution of REST2 (Replica Exchange with Solute Tempering) enhanced sampling simulations using GROMACS and PLUMED.**
 
-## Quick Start
+REST2 is an advanced enhanced sampling technique that selectively heats the solute (region of interest) while keeping the solvent at a reference temperature, providing more efficient conformational sampling compared to traditional replica exchange methods.
 
-1. **Prepare MD results**: Complete standard MD simulation (EM → NVT → NPT → MD)
-2. **Configure**: Edit `configs/config_simple.yaml` with your system parameters
-3. **Run**: `python main.py -c configs/config_simple.yaml`
-4. **Execute**: Submit generated scripts to run REST2 simulation
+---
+
+## Features
+
+- ✅ **Automated REST2 Setup**: Complete workflow automation from structure analysis to script generation
+- ✅ **Exponential Temperature Scaling**: Optimized replica distribution with more sampling at lower temperatures
+- ✅ **Flexible Target Selection**: Automatic selection of solute and nearby residues using MDAnalysis
+- ✅ **PLUMED Integration**: Automatic generation of PLUMED PARTIAL_TEMPERING configurations
+- ✅ **Script Generation**: Create SLURM, local run, and test scripts automatically
+- ✅ **Validation Framework**: Built-in validation for all configuration parameters
+- ✅ **Trajectory-based Selection**: Optional contact analysis using MD trajectories
+
+---
 
 ## Requirements
 
-- Python 3.7+
-- GROMACS with MPI support
-- PLUMED (compiled with GROMACS)
-- MDAnalysis: `pip install MDAnalysis`
+### Software Dependencies
 
-## Project Structure
+- **Python**: 3.7+ (tested with 3.12)
+- **GROMACS**: 2019+ with MPI support (tested with 2023.2)
+- **PLUMED**: 2.5+ compiled with GROMACS (tested with 2.9.0)
 
-```
-REST2_Project/
-├── main.py                    # Main execution script
-├── configs/                   # Configuration files
-│   ├── config_simple.yaml    # Simple configuration template
-│   ├── config_template.yaml  # Full configuration template
-│   └── example_config_chain_c.yaml  # Example configuration
-├── modules/                   # Core modules
-│   ├── config_manager.py
-│   ├── structure_analyzer.py
-│   ├── solute_selector.py
-│   ├── replica_generator.py
-│   ├── temperature_controller.py
-│   └── gromacs_runner.py
-├── templates/
-│   └── plumed.dat            # PLUMED template (optional)
-└── example/
-    └── MD_results/           # Your completed MD simulation
-        ├── md.tpr
-        ├── topol.top
-        ├── md.gro
-        └── md.xtc (optional)
-```
+### Python Packages
 
-## Running the Example
-
-The project includes a complete example to demonstrate the REST2 workflow. Follow these steps to run the example:
-
-### Step 1: Check Example Files
+Install via conda (recommended):
 ```bash
-# Verify example files are present
-ls example/
-# Should show: md.gro, md.tpr, topol.top, example.xtc, charmm36-jul2021.ff/, mdp/
+conda env create -f environment.yml
+conda activate rest2_env
 ```
 
-### Step 2: Install Dependencies
+Or install via pip:
 ```bash
-# Run the installation script
-./install.sh
-
-# Or manually install Python dependencies
 pip install -r requirements.txt
 ```
 
-### Step 3: Configure for Example
-The example uses chain C selection. The configuration is already set up in `configs/example_config_chain_c.yaml`:
+Required packages:
+- `numpy>=1.21.0`
+- `scipy>=1.7.0`
+- `MDAnalysis>=2.0.0`
+- `PyYAML>=6.0`
+
+---
+
+## Installation
+
+### Method 1: Using Conda (Recommended)
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd REST2_Project
+
+# Create conda environment
+conda env create -f environment.yml
+conda activate rest2_env
+
+# Verify installation
+python main.py --help
+```
+
+### Method 2: Using Pip
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd REST2_Project
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Verify installation
+python main.py --help
+```
+
+### Verify GROMACS and PLUMED
+
+```bash
+# Check GROMACS
+gmx --version
+
+# Check PLUMED
+plumed --version
+
+# Check if PLUMED is patched with GROMACS
+gmx mdrun -h 2>&1 | grep -i plumed
+```
+
+---
+
+## Quick Start
+
+### 1. Prepare Your MD Results
+
+Complete a standard MD simulation workflow:
+```
+Energy Minimization (EM) → NVT → NPT → Production MD
+```
+
+Ensure you have these files:
+- `md.tpr` - Production MD run file
+- `topol.top` - System topology file
+- `md.gro` - Final structure file
+- `md.xtc` (optional) - Trajectory for contact analysis
+
+### 2. Configure Your System
+
+Edit a configuration file (or use the example):
 
 ```yaml
-# Input files for example
-topology: "example/topol.top"
-input_tpr: "example/md.tpr"
-md_results_dir: "example"
-output_dir: "rest2_simulation"
+# configs/my_system.yaml
+target_type: peptide
+T_min: 300.0              # Reference temperature (K)
+T_max: 340.0              # Maximum temperature (K)
+n_replicas: 8             # Number of replicas
+scaling_method: exponential  # Exponential temperature distribution
 
-# Target selection for chain C
-target_selection: "chainid C"
-distance_range: 5.0
+# File paths
+input_tpr: path/to/md.tpr
+topology: path/to/topol.top
+md_results_dir: path/to/MD_results
+output_dir: ./rest2_simulation
 
-# REST2 parameters
-n_replicas: 8
-temperature:
-  min: 300.0
-  max: 400.0
-temperature_method: "linear"
-replex: 1000
+# Target selection (MDAnalysis syntax)
+target_selection: "protein"  # or "chainid A" or "resname LIG"
+distance_range: 5.0          # Angstroms
 
 # GROMACS settings
 gromacs:
-  gmx_mpi_command: "gmx_mpi"
-  n_cpus: 4
-  n_gpus: 1
-  script_types: ["slurm", "localrun", "test"]
+  gmx_mpi_command: gmx       # or gmx_mpi if MPI version available
+  n_cpus: 8
+  n_gpus: 2
 ```
 
-### Step 4: Run the Example
-```bash
-# Run complete REST2 setup
-python main.py -c configs/example_config_chain_c.yaml
+### 3. Run the Setup
 
-# Or run with verbose output
-python main.py -c configs/example_config_chain_c.yaml --verbose
+```bash
+# Activate environment
+conda activate rest2_env
+
+# Validate configuration
+python main.py -c configs/my_system.yaml --validate-only
+
+# Run complete setup
+python main.py -c configs/my_system.yaml
+
+# Or with verbose output
+python main.py -c configs/my_system.yaml --verbose
 ```
 
-### Step 5: Verify Output
-After successful execution, check the generated files:
+### 4. Execute REST2 Simulation
 
 ```bash
-# Check main output directory
-ls rest2_simulation/
-
-# Check replica directories
-ls rest2_simulation/replica_0/input/
-
-# Check generated scripts
-ls rest2_simulation/*.sh
-ls rest2_simulation/*.slurm
-```
-
-### Step 6: Test the Setup
-```bash
-# Navigate to output directory
 cd rest2_simulation
 
-# Run quick test (1000 steps)
+# Test the setup (short run)
 ./test_rest2.sh
 
-# Check test results
-ls replica_*/output/
-```
-
-### Step 7: Run Full Simulation (Optional)
-```bash
-# For cluster submission
+# Submit to cluster
 sbatch run_rest2.slurm
 
-# For local execution
+# Or run locally
 ./run_rest2_local.sh
 ```
 
-## Example Workflow Details
+---
 
-The example demonstrates these workflow steps:
+## Temperature Scaling Method
 
-1. **Structure Analysis**: Analyzes `example/md.gro` and `example/md.tpr`
-   - Extracts PDB with chain information using `gmx trjconv`
-   - Identifies chain C atoms as target
-   - Finds nearby residues within 5.0 Å
+This tool uses **exponential temperature scaling** for optimal replica distribution:
 
-2. **Topology Merge**: Merges topology files using `gmx grompp -pp`
-   - Processes `example/topol.top` with `example/md.gro`
-   - Creates `processed.top` with merged topology information
-
-3. **Solute Selection**: Modifies topology for REST2 scaling
-   - Marks all solute atoms (not just alpha carbons)
-   - Creates `rest2_topol.top` with REST2 modifications
-
-4. **Replica Generation**: Creates 8 replica directories
-   - `replica_0/` through `replica_7/`
-   - Each with input files and output directories
-
-5. **Temperature Control**: Generates temperature-specific files
-   - Temperature range: 300K to 400K (linear spacing)
-   - PLUMED `PARTIAL_TEMPERING` commands for each replica
-   - MDP files with appropriate parameters
-
-6. **Script Generation**: Creates execution scripts
-   - `test_rest2.sh`: Quick validation script
-   - `run_rest2_local.sh`: Local execution script
-   - `run_rest2.slurm`: SLURM cluster script
-
-## Configuration Files
-
-### Simple Configuration (`configs/config_simple.yaml`)
-Use this for basic REST2 setup:
-
-```yaml
-# Input files
-topology: "example/topol.top"
-input_tpr: "example/md.tpr"
-md_results_dir: "example"
-output_dir: "rest2_simulation"
-
-# Target selection for REST2 scaling
-target_selection: "chainid A"
-distance_range: 5.0
-
-# REST2 parameters
-n_replicas: 8
-temperature:
-  min: 300.0
-  max: 400.0
-temperature_method: "linear"
-replex: 1000
-
-# GROMACS settings
-gromacs:
-  gmx_mpi_command: "gmx_mpi"
-  n_cpus: 4
-  n_gpus: 1
-  script_types: ["slurm", "localrun", "test"]
-
-# Simulation settings
-simulation:
-  production_time: 100.0
-  dt: 0.002
-```
-
-### Full Configuration Template (`configs/config_template.yaml`)
-Contains all available options with detailed descriptions and examples.
-
-## Usage
-
-### Basic Usage
-```bash
-# Complete REST2 setup
-python main.py -c configs/config_simple.yaml
-
-# Custom output directory
-python main.py -c configs/config_simple.yaml -o ./my_rest2_sim
-```
-
-### Advanced Usage
-```bash
-# Only validate configuration
-python main.py -c configs/config_simple.yaml --validate-only
-
-# Only generate execution scripts
-python main.py -c configs/config_simple.yaml --scripts-only
-
-# Verbose output
-python main.py -c configs/config_simple.yaml --verbose
-```
-
-## Workflow Steps
-
-The automation performs these steps:
-
-1. **Structure Analysis**: Identifies target atoms and nearby residues
-2. **Topology Merge**: Merges topology files using GROMACS tools
-3. **Solute Selection**: Modifies topology file to mark REST2 atoms
-4. **Replica Generation**: Creates replica directories and copies files
-5. **Temperature Control**: Generates temperature-specific input files with PLUMED REST2
-6. **Script Generation**: Creates execution scripts for your environment
-
-## Generated Files
-
-After successful execution:
+### Formula
 
 ```
-rest2_simulation/
-├── replica_0/
-│   ├── input/
-│   │   ├── input.tpr         # GROMACS run file
-│   │   ├── topol.top         # Modified topology
-│   │   ├── rest2.mdp         # MD parameters
-│   │   ├── plumed.dat        # PLUMED with PARTIAL_TEMPERING
-│   │   └── index.ndx         # Index file
-│   └── output/               # Simulation outputs (created during run)
-├── replica_1/
-├── ...
-├── run_rest2.slurm          # SLURM job script
-├── run_rest2_local.sh       # Local execution script
-├── test_rest2.sh            # Quick test script
-└── temperature_summary.txt  # Temperature and scaling info
+T[i] = T_min × exp(i × log(T_max/T_min) / (n-1))
 ```
 
-## Running Simulations
-
-### Test Setup
-```bash
-cd rest2_simulation
-./test_rest2.sh              # Quick validation (1000 steps)
+Or equivalently:
+```
+ratio = (T_max/T_min)^(1/(n-1))
+T[i] = T_min × ratio^i
 ```
 
-### Cluster Submission
-```bash
-sbatch run_rest2.slurm        # Submit to SLURM scheduler
+### Characteristics
+
+- ✅ **More replicas at lower temperatures**: ΔT increases from low to high temperature
+- ✅ **Better sampling efficiency**: Enhanced sampling where it matters most
+- ✅ **Optimal for REST2**: Better exchange acceptance rates at low temperatures
+
+### Example (300-340 K, 8 replicas)
+
+```
+Replica  Temperature  λ         ΔT
+0        300.0 K      1.000000  5.41 K
+1        305.4 K      0.982278  5.51 K
+2        310.9 K      0.964871  5.61 K
+3        316.5 K      0.947772  5.71 K
+4        322.2 K      0.930976  5.81 K
+5        328.1 K      0.914478  5.92 K
+6        333.9 K      0.898272  6.03 K
+7        340.0 K      0.882353  -
 ```
 
-### Local Execution
-```bash
-./run_rest2_local.sh          # Run on workstation
-```
+**Key advantage**: ΔT increases from 5.41K to 6.03K, providing denser replica coverage at lower temperatures where conformational barriers are typically higher.
+
+---
 
 ## Configuration Options
 
-### Target Types
-- **peptide**: Use `target_selection: chain A` (or other chain)
-- **small_molecule**: Use `target_selection: resname LIG` (or other residue name)
+### Basic Settings
 
-### Temperature Scaling
-- **linear**: Even temperature spacing
-- **exponential**: Exponential temperature distribution
+```yaml
+# Target specification
+target_type: peptide          # peptide or small_molecule
+target_selection: "chainid A" # MDAnalysis selection syntax
 
-### Resource Configuration
+# Temperature settings
+T_min: 300.0                  # Reference temperature (K)
+T_max: 340.0                  # Maximum temperature (K)
+n_replicas: 8                 # Number of replicas
+scaling_method: exponential   # Exponential temperature distribution
+replex: 1000                  # Exchange attempt interval (steps)
+
+# Solute selection
+distance_range: 5.0           # Cutoff distance (Angstroms)
+use_trajectory: false         # Use MD trajectory for contact analysis
+occupancy_threshold: 0.5      # Contact occupancy threshold (if using trajectory)
+```
+
+### File Settings
+
+```yaml
+# Input files
+input_tpr: example/md.tpr
+topology: example/topol.top
+md_results_dir: example
+plumed_dat: templates/plumed.dat  # Optional custom PLUMED template
+
+# Output settings
+output_dir: ./rest2_simulation
+force_overwrite: true
+```
+
+### GROMACS Settings
+
 ```yaml
 gromacs:
-  n_cpus: 8                   # Total CPU cores
-  n_gpus: 2                   # Total GPUs
-  script_types:               # Choose scripts to generate
-    - slurm                   # Cluster submission
-    - localrun                # Local execution
-    - test                    # Quick validation
+  gmx_mpi_command: gmx         # GROMACS command (gmx or gmx_mpi)
+  n_cpus: 8                    # Total CPU cores
+  n_gpus: 2                    # Total GPUs
+  script_types:                # Scripts to generate
+    - slurm                    # SLURM cluster submission
+    - localrun                 # Local execution
+    - test                     # Quick validation
 ```
 
-### Trajectory-based Selection
+### Target Selection Examples
+
 ```yaml
-use_trajectory: true          # Use MD trajectory for selection
-occupancy_threshold: 0.5      # Minimum contact occupancy (0-1)
+# Select specific chain
+target_selection: "chainid A"
+
+# Select ligand
+target_selection: "resname LIG"
+
+# Select residue range
+target_selection: "resid 1-100"
+
+# Select protein
+target_selection: "protein"
+
+# Complex selection
+target_selection: "protein and (resid 1-50 or resid 100-150)"
 ```
 
-## Input Requirements
+For complete options, see `configs/config_template.yaml`
 
-Your `MD_results/` directory must contain:
-- `md.tpr`: Production MD run file
-- `topol.top`: System topology file  
-- `md.gro`: Final structure file
-- `md.xtc`: Trajectory file (if `use_trajectory: true`)
-
-## PLUMED Integration
-
-The system automatically generates PLUMED `PARTIAL_TEMPERING` commands:
-
-```plumed
-PARTIAL_TEMPERING ...
-  ATOMS=1-50,75-100           # Solute atoms (auto-generated)
-  TEMP=300.0                  # Reference temperature
-  LAMBDA=0.882353             # Scaling factor for this replica
-  LABEL=rest2_scaling
-... PARTIAL_TEMPERING
-```
+---
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Configuration validation failed**
-- Check file paths in `md_results_dir`
-- Verify temperature range: `T_min < T_max`
-- Ensure `target_selection` matches your system
+#### 1. Configuration Validation Failed
 
-**Structure analysis failed**
-- Verify structure and topology files exist
-- Check `target_selection` syntax (GROMACS selection language)
-- Ensure trajectory file exists if `use_trajectory: true`
+**Problem**: Configuration file has invalid parameters
 
-**No atoms found for selection**
-- Check `target_selection` string
-- Verify chain/residue names in your system
-- Try simpler selection like `protein` or `not water`
-
-**Script execution fails**
-- Verify GROMACS and PLUMED installation
-- Check MPI configuration
-- Ensure sufficient GPU/CPU resources
-
-### File Requirements
-
-Ensure your MD results contain standard GROMACS files:
+**Solution**:
 ```bash
-ls example/MD_results/
-# Should show: md.tpr topol.top md.gro [md.xtc]
+# Check configuration syntax
+python main.py -c config.yaml --validate-only
+
+# Common issues:
+# - Missing required files
+# - T_max <= T_min
+# - Invalid target_selection syntax
+# - Wrong file paths
 ```
+
+#### 2. ModuleNotFoundError: No module named 'MDAnalysis'
+
+**Problem**: Python dependencies not installed
+
+**Solution**:
+```bash
+# If using conda
+conda activate rest2_env
+conda install -c conda-forge mdanalysis scipy
+
+# If using pip
+pip install MDAnalysis scipy numpy PyYAML
+```
+
+#### 3. GROMACS Command Not Found
+
+**Problem**: `gmx` or `gmx_mpi` not in PATH
+
+**Solution**:
+```bash
+# Check GROMACS installation
+which gmx
+which gmx_mpi
+
+# If not found, load module (on cluster)
+module load gromacs
+
+# Update config file
+gromacs:
+  gmx_mpi_command: gmx  # or gmx_mpi
+```
+
+#### 4. No Atoms Found for Selection
+
+**Problem**: Target selection doesn't match any atoms
+
+**Solution**:
+```bash
+# Test selection manually:
+python -c "import MDAnalysis as mda; u = mda.Universe('example/md.tpr'); print(u.select_atoms('chainid C'))"
+
+# Try simpler selection
+target_selection: "protein"  # Instead of specific chain
+```
+
+### Getting Help
+
+For detailed error messages, use verbose mode:
+```bash
+python main.py -c config.yaml --verbose
+```
+
+---
+
+## Running the Example
+
+The project includes a complete working example:
+
+```bash
+# 1. Check example files
+ls example/
+# Output: md.gro, md.tpr, topol.top, charmm36-jul2021.ff/
+
+# 2. Validate example configuration
+python main.py -c configs/example_config.yaml --validate-only
+
+# 3. Run the example setup
+python main.py -c configs/example_config.yaml
+
+# 4. Verify generated files
+ls rest2_simulation/
+ls rest2_simulation/replica_0/input/
+
+# 5. Run quick test
+cd rest2_simulation
+./test_rest2.sh
+```
+
+---
+
+## Generated Output Structure
+
+After running the setup, you will get:
+
+```
+rest2_simulation/
+├── replica_0/
+│   ├── input/
+│   │   ├── input.tpr               # GROMACS run file
+│   │   ├── topol.top               # Scaled topology
+│   │   ├── rest2.mdp               # MD parameters
+│   │   ├── plumed.dat              # PLUMED configuration
+│   │   └── index.ndx               # Index file
+│   ├── output/                     # Simulation outputs (created during run)
+│   └── replica_info.txt            # Replica information
+├── replica_1/
+├── ... (replica_2 to replica_7)
+│
+├── processed.top                   # Merged topology
+├── rest2_topol.top                # REST2-modified topology
+├── selected_residues.txt          # Selected residues info
+├── temperature_summary.txt        # Temperature ladder info
+│
+├── run_rest2.slurm                # SLURM submission script
+├── run_rest2_local.sh             # Local execution script
+└── test_rest2.sh                  # Quick test script
+```
+
+---
 
 ## Performance Tips
 
-- Use 1 GPU per replica for optimal performance
-- Set `n_cpus` equal to `n_replicas` for standard setups
-- For large systems, consider fewer replicas with smaller temperature gaps
-- Test with short runs before full production simulations
+1. **GPU Allocation**: Use 1 GPU per replica for optimal performance
+   ```yaml
+   n_gpus: 8  # For 8 replicas
+   ```
 
-## Support
+2. **CPU Allocation**: Match CPUs to replicas
+   ```yaml
+   n_cpus: 8  # For 8 replicas
+   ```
 
-For issues or questions:
-1. Check configuration file syntax
-2. Verify input file requirements
-3. Test with `--validate-only` flag
-4. Use `--verbose` for detailed error messages
+3. **Exchange Frequency**: Start with conservative values
+   ```yaml
+   replex: 1000  # Exchange every 1000 steps (2 ps with dt=0.002)
+   ```
+
+4. **Number of Replicas**: More replicas = better exchange, but higher cost
+   - Small systems: 4-8 replicas
+   - Large systems: 8-16 replicas
+   - Rule of thumb: Exchange acceptance ~20-30%
+
+5. **Temperature Range**: Keep T_max/T_min < 1.3 for good exchange
+   ```yaml
+   T_min: 300.0
+   T_max: 380.0  # Ratio = 1.27 ✓
+   ```
+
+---
+
+## Command-Line Options
+
+```bash
+# Main options
+python main.py -c CONFIG [-o OUTPUT_DIR] [OPTIONS]
+
+Options:
+  -c, --config CONFIG       Configuration file (required)
+  -o, --output-dir DIR      Override output directory
+  --validate-only           Only validate configuration
+  --scripts-only            Only generate execution scripts
+  --verbose, -v             Verbose output
+  -h, --help                Show help message
+```
+
+---
+
+## References
+
+### REST2 Method
+- Wang, L., Friesner, R. A., & Berne, B. J. (2011). *Replica exchange with solute scaling: a more efficient version of replica exchange with solute tempering (REST2)*. The Journal of Physical Chemistry B, 115(30), 9431-9438.
+
+### PLUMED
+- Tribello, G. A., Bonomi, M., Branduardi, D., Camilloni, C., & Bussi, G. (2014). *PLUMED 2: New feathers for an old bird*. Computer Physics Communications, 185(2), 604-613.
+- PLUMED REST2 Documentation: https://www.plumed.org/doc-v2.9/user-doc/html/_p_a_r_t_i_a_l__t_e_m_p_e_r_i_n_g.html
+
+### GROMACS
+- Abraham, M. J., et al. (2015). *GROMACS: High performance molecular simulations*. SoftwareX, 1, 19-25.
+- GROMACS Manual: https://manual.gromacs.org/
+
+### MDAnalysis
+- Michaud-Agrawal, N., et al. (2011). *MDAnalysis: a toolkit for the analysis of molecular dynamics simulations*. Journal of computational chemistry, 32(10), 2319-2327.
+
+---
+
+## Citation
+
+If you use this tool in your research, please cite the REST2 original paper:
+
+```bibtex
+@article{wang2011rest2,
+  title={Replica exchange with solute scaling: a more efficient version of replica exchange with solute tempering (REST2)},
+  author={Wang, Lingle and Friesner, Richard A and Berne, Bruce J},
+  journal={The Journal of Physical Chemistry B},
+  volume={115},
+  number={30},
+  pages={9431--9438},
+  year={2011},
+  publisher={ACS Publications}
+}
+```
+
+---
+
+## License
+
+See [LICENSE](LICENSE) file for details.
+
+---
+
+## Changelog
+
+### Version 2.0 (Current)
+- ✨ Optimized for exponential temperature scaling
+- ✨ Enhanced validation framework
+- ✨ Better error messages and logging
+- 📝 Comprehensive documentation
+- 🐛 Bug fixes and performance improvements
+
+### Version 1.0
+- 🎉 Initial release
+- ✅ Basic REST2 setup automation
+- ✅ PLUMED integration
+- ✅ Script generation
+
+---
+
+**Happy Sampling! 🚀**

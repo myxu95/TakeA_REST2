@@ -1,16 +1,15 @@
-# REST2 Configuration for Example Files - Chain C Selection
+# REST2 Configuration - Exponential Temperature Scaling
 target_type: peptide
 T_min: 300.0
 T_max: 340.0
 replex: 200
 n_replicas: 8
-scaling_method: linear
+scaling_method: exponential  # Exponential temperature distribution (default)
 
 # File paths
 input_tpr: example/md.tpr
 topology: example/topol.top
 output_tpr: rest2_topol.top
-# plumed_dat: templates/plumed.dat  # 注释掉，只使用REST2命令
 
 # Selection parameters - Chain C selection
 distance_range: 6.0
@@ -27,11 +26,15 @@ force_overwrite: true
 
 # GROMACS settings
 gromacs:
-  gmx_mpi_command: gmx_mpi
+  gmx_mpi_command: gmx  # Change to gmx_mpi if MPI version available
   n_cpus: 8
   n_gpus: 2
   script_types: [slurm, localrun, test]
 
 # Simulation settings
 simulation:
-  production_time: 100.0 
+  production_time: 100.0
+
+# Exponential temperature scaling:
+# Formula: T[i] = T_min * (T_max/T_min)^(i/(n-1))
+# Benefit: More replicas at lower temperatures for enhanced sampling 

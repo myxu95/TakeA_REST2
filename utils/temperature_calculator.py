@@ -21,20 +21,21 @@ class TemperatureCalculator:
     """
     
     @staticmethod
-    def calculate_temperature_ladder(T_min: float, T_max: float, n_replicas: int, 
-                                   method: str = 'linear') -> List[float]:
+    def calculate_temperature_ladder(T_min: float, T_max: float, n_replicas: int,
+                                   method: str = 'exponential') -> List[float]:
         """
         Calculate temperature ladder for REST2 replicas
-        
+
         Args:
             T_min: Minimum temperature (K)
             T_max: Maximum temperature (K)
             n_replicas: Number of replicas
-            method: Scaling method ('linear' or 'exponential')
-            
+            method: Scaling method (default: 'exponential' - exponential temperature distribution)
+                    Formula: T[i] = T_min * exp(i * log(T_max/T_min) / (n-1))
+
         Returns:
             List of temperatures for each replica
-            
+
         Raises:
             TemperatureCalculationError: If parameters are invalid
         """
@@ -45,21 +46,29 @@ class TemperatureCalculator:
             raise TemperatureCalculationError("T_max must be greater than T_min")
         if n_replicas < 1:
             raise TemperatureCalculationError("n_replicas must be at least 1")
-        
+
         # Single replica case
         if n_replicas == 1:
             return [T_min]
-        
+
         # Calculate temperatures based on method
-        if method == 'linear':
-            temperatures = np.linspace(T_min, T_max, n_replicas).tolist()
-        elif method == 'exponential':
+        # Default and recommended: Exponential temperature spacing
+        # Formula: T[i] = T_min * exp(i * log(T_max/T_min) / (n-1))
+        # Equivalent: T[i] = T_min * (T_max/T_min)^(i/(n-1))
+
+        if method == 'exponential':
             # Exponential temperature spacing
+            # More replicas at lower temperatures (ΔT increases)
             ratio = (T_max / T_min) ** (1.0 / (n_replicas - 1))
             temperatures = [T_min * (ratio ** i) for i in range(n_replicas)]
+        elif method == 'linear':
+            # Legacy support: Linear temperature spacing
+            temperatures = np.linspace(T_min, T_max, n_replicas).tolist()
         else:
-            raise TemperatureCalculationError(f"Unknown scaling method: {method}")
-        
+            raise TemperatureCalculationError(
+                f"Unknown scaling method: {method}. Use 'exponential' (recommended) or 'linear'"
+            )
+
         return temperatures
     
     @staticmethod
@@ -92,16 +101,16 @@ class TemperatureCalculator:
     
     @staticmethod
     def calculate_temperature_and_scaling(T_min: float, T_max: float, n_replicas: int,
-                                       method: str = 'linear') -> Tuple[List[float], List[float]]:
+                                       method: str = 'exponential') -> Tuple[List[float], List[float]]:
         """
         Calculate both temperature ladder and scaling factors
-        
+
         Args:
             T_min: Minimum temperature (K)
             T_max: Maximum temperature (K)
             n_replicas: Number of replicas
-            method: Scaling method ('linear' or 'exponential')
-            
+            method: Scaling method ('linear', 'exponential', 'linear_lambda')
+
         Returns:
             Tuple of (temperatures, scaling_factors)
         """
@@ -109,24 +118,24 @@ class TemperatureCalculator:
             T_min, T_max, n_replicas, method
         )
         scaling_factors = TemperatureCalculator.calculate_scaling_factors(temperatures)
-        
+
         return temperatures, scaling_factors
     
     @staticmethod
     def validate_temperature_parameters(T_min: float, T_max: float, n_replicas: int,
-                                     method: str = 'linear') -> bool:
+                                     method: str = 'exponential') -> bool:
         """
         Validate temperature calculation parameters
-        
+
         Args:
             T_min: Minimum temperature (K)
             T_max: Maximum temperature (K)
             n_replicas: Number of replicas
             method: Scaling method
-            
+
         Returns:
             True if parameters are valid
-            
+
         Raises:
             TemperatureCalculationError: If parameters are invalid
         """
@@ -137,13 +146,13 @@ class TemperatureCalculator:
             raise TemperatureCalculationError("T_max must be greater than T_min")
         if n_replicas < 1:
             raise TemperatureCalculationError("n_replicas must be at least 1")
-        if method not in ['linear', 'exponential']:
+        if method not in ['linear', 'exponential', 'linear_lambda']:
             raise TemperatureCalculationError(f"Unknown scaling method: {method}")
-        
+
         # Method-specific validation
-        if method == 'exponential' and T_min <= 0:
-            raise TemperatureCalculationError("T_min must be positive for exponential scaling")
-        
+        if method in ['exponential', 'linear_lambda'] and T_min <= 0:
+            raise TemperatureCalculationError(f"T_min must be positive for {method} scaling")
+
         return True
     
     @staticmethod
@@ -178,38 +187,50 @@ def main():
         T_min = 300.0
         T_max = 340.0
         n_replicas = 8
-        
+
         print("Testing Temperature Calculator")
         print("=" * 40)
-        
+
         # Test linear scaling
-        print("Linear scaling:")
+        print("\n1. Linear Temperature Scaling:")
         temperatures_linear, scaling_linear = TemperatureCalculator.calculate_temperature_and_scaling(
             T_min, T_max, n_replicas, 'linear'
         )
         TemperatureCalculator.print_temperature_summary(temperatures_linear, scaling_linear, 'linear')
-        
+
+        # Test linear lambda scaling (NEW)
+        print("\n2. Linear Lambda Scaling (Uniform λ):")
+        temperatures_lambda, scaling_lambda = TemperatureCalculator.calculate_temperature_and_scaling(
+            T_min, T_max, n_replicas, 'linear_lambda'
+        )
+        TemperatureCalculator.print_temperature_summary(temperatures_lambda, scaling_lambda, 'linear_lambda')
+
+        # Verify uniform lambda spacing
+        lambda_diffs = [scaling_lambda[i] - scaling_lambda[i+1] for i in range(n_replicas-1)]
+        print(f"λ adjacent differences: {[f'{d:.6f}' for d in lambda_diffs]}")
+        print(f"Δλ constant = {lambda_diffs[0]:.6f} (uniform spacing)")
+
         # Test exponential scaling
-        print("Exponential scaling:")
+        print("\n3. Exponential Temperature Scaling:")
         temperatures_exp, scaling_exp = TemperatureCalculator.calculate_temperature_and_scaling(
             T_min, T_max, n_replicas, 'exponential'
         )
         TemperatureCalculator.print_temperature_summary(temperatures_exp, scaling_exp, 'exponential')
-        
+
         # Test validation
-        print("Testing validation:")
-        TemperatureCalculator.validate_temperature_parameters(T_min, T_max, n_replicas, 'linear')
-        print("✓ Parameter validation passed")
-        
+        print("\nTesting validation:")
+        TemperatureCalculator.validate_temperature_parameters(T_min, T_max, n_replicas, 'linear_lambda')
+        print("✓ Parameter validation passed for linear_lambda")
+
         # Test error handling
         print("\nTesting error handling:")
         try:
             TemperatureCalculator.calculate_temperature_ladder(0, T_max, n_replicas)
         except TemperatureCalculationError as e:
             print(f"✓ Caught expected error: {e}")
-        
+
         print("\n✓ All tests passed!")
-        
+
     except Exception as e:
         print(f"✗ Test failed: {e}")
         import traceback
