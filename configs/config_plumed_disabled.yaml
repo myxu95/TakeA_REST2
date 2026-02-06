@@ -21,7 +21,7 @@ n_replicas: 16
 temperature:
   min: 300.0
   max: 320.0
-temperature_method: "linear"
+temperature_method: "exponential"  # Exponential temperature distribution
 replex: 1000
 
 # GROMACS settings

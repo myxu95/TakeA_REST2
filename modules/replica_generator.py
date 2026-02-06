@@ -258,7 +258,7 @@ def main():
                     'T_min': 300.0,
                     'T_max': 340.0,
                     'n_replicas': 8,
-                    'scaling_method': 'linear',
+                    'scaling_method': 'exponential',  # Exponential temperature distribution
                     'output_dir': './test_replicas',
                     'input_tpr': 'test_input.tpr',
                     'plumed_dat': 'test_plumed.dat'

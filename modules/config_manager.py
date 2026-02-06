@@ -161,7 +161,7 @@ class ConfigManager:
             'T_max': 340.0,
             'replex': 200,
             'n_replicas': 8,
-            'scaling_method': 'linear',
+            'scaling_method': 'exponential',  # Exponential temperature distribution (default)
             'input_tpr': 'example/MD_results/md.tpr',
             'topology': 'example/MD_results/topol.top',
             'plumed_dat': 'templates/plumed.dat',

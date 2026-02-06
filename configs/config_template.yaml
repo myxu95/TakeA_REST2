@@ -57,8 +57,9 @@ temperature:
   max: 400.0
 
 # Temperature scaling method
-# Options: "linear", "exponential"
-temperature_method: "linear"
+# Options: "exponential" (recommended, more replicas at lower temperatures), "linear" (legacy)
+# Formula: T[i] = T_min * (T_max/T_min)^(i/(n-1))
+temperature_method: "exponential"
 
 # Exchange frequency between replicas (steps)
 replex: 1000
